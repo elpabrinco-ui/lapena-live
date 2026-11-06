@@ -13,20 +13,31 @@ import android.text.TextUtils
 import android.text.TextPaint
 
 /**
- * Dibuja el marcador como imagen: [escudo][LOCAL][2 - 1][VISITA][1T 12:34]
+ * Dibuja el marcador como imagen: [escudo][LOCAL][2 - 1][VISITA][2T | 12:34]
+ * Cada nombre ocupa el ancho que necesita (hasta un máximo). Si es muy largo,
+ * la letra se achica un poco; solo si no alcanza, se corta con "…".
  * Se dibuja al doble de tamaño para que se vea nítido en el video.
  */
 class ScoreboardRenderer(context: Context) {
 
   companion object {
-    // Tamaño "lógico" en píxeles del video 1280x720
-    const val WIDTH = 540
+    // Tamaños "lógicos" en píxeles del video 1280x720
     const val HEIGHT = 64
-    private const val S = 2f // factor de nitidez
+    const val S = 2f // factor de nitidez
+
+    private const val CREST_W = 64f
+    private const val NAME_MIN_W = 100f
+    private const val NAME_MAX_W = 230f
+    private const val NAME_PAD = 14f
+    private const val NAME_SIZE = 24f
+    private const val NAME_MIN_SIZE = 18f
+    private const val SCORE_W = 86f
+    private const val PERIOD_W = 48f
+    private const val CLOCK_W = 100f
 
     private val MAROON = Color.parseColor("#7A1F2B")
     private val DARK = Color.parseColor("#E6141414")
-    private val SCORE_BG = Color.WHITE
+    private val SEPARATOR = Color.parseColor("#55FFFFFF")
   }
 
   private val crest: Bitmap? =
@@ -35,7 +46,6 @@ class ScoreboardRenderer(context: Context) {
   private val namePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
     color = Color.WHITE
     typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-    textSize = 24 * S
     textAlign = Paint.Align.CENTER
   }
   private val scorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -46,32 +56,56 @@ class ScoreboardRenderer(context: Context) {
   }
   private val clockPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = Color.WHITE
-    typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
     textSize = 26 * S
     textAlign = Paint.Align.CENTER
   }
   private val periodPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = Color.parseColor("#FFC9C9")
     typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-    textSize = 18 * S
+    textSize = 26 * S
     textAlign = Paint.Align.CENTER
   }
   private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
 
+  /** Nombre ya preparado: texto, tamaño de letra y ancho de su caja (en px reales). */
+  private data class NameLayout(val text: String, val size: Float, val boxW: Float)
+
+  private fun layoutName(raw: String): NameLayout {
+    val text = raw.trim().uppercase().ifEmpty { "-" }
+    val maxText = (NAME_MAX_W - NAME_PAD * 2) * S
+    // 1) Probar con la letra normal; 2) achicar hasta el mínimo; 3) cortar con "…"
+    var size = NAME_SIZE
+    namePaint.textSize = size * S
+    while (namePaint.measureText(text) > maxText && size > NAME_MIN_SIZE) {
+      size -= 1f
+      namePaint.textSize = size * S
+    }
+    val finalText =
+      TextUtils.ellipsize(text, namePaint, maxText, TextUtils.TruncateAt.END).toString()
+    val textW = namePaint.measureText(finalText)
+    val boxW = (textW + NAME_PAD * 2 * S).coerceIn(NAME_MIN_W * S, NAME_MAX_W * S)
+    return NameLayout(finalText, size, boxW)
+  }
+
   fun render(state: MatchState, clockMs: Long): Bitmap {
-    val w = (WIDTH * S).toInt()
+    val home = layoutName(state.home)
+    val away = layoutName(state.away)
+
     val h = (HEIGHT * S).toInt()
+    val crestW = CREST_W * S
+    val scoreW = SCORE_W * S
+    val periodW = PERIOD_W * S
+    val clockW = CLOCK_W * S
+    val w = (crestW + home.boxW + scoreW + away.boxW + periodW + clockW).toInt()
+
     val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp)
+    val radius = 10 * S
 
-    val crestW = 64 * S
-    val nameW = 135 * S
-    val scoreW = 86 * S
-    val clockW = w - crestW - nameW * 2 - scoreW
-
-    // Fondo general redondeado
+    // Fondo bordó
     fill.color = MAROON
-    c.drawRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), 10 * S, 10 * S, fill)
+    c.drawRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), radius, radius, fill)
 
     // Escudo
     crest?.let {
@@ -80,32 +114,33 @@ class ScoreboardRenderer(context: Context) {
     }
 
     var x = crestW
-    drawName(c, state.home, x, nameW, h)
-    x += nameW
+    drawName(c, home, x, h)
+    x += home.boxW
 
     // Goles (caja blanca)
-    fill.color = SCORE_BG
+    fill.color = Color.WHITE
     c.drawRect(RectF(x, 8 * S, x + scoreW, h - 8 * S), fill)
     drawCentered(c, "${state.homeGoals} - ${state.awayGoals}", x + scoreW / 2, h / 2f, scorePaint)
     x += scoreW
 
-    drawName(c, state.away, x, nameW, h)
-    x += nameW
+    drawName(c, away, x, h)
+    x += away.boxW
 
-    // Reloj (caja oscura)
+    // Tiempo + reloj (caja oscura), separados por una línea fina
     fill.color = DARK
-    c.drawRoundRect(RectF(x, 0f, w.toFloat(), h.toFloat()), 10 * S, 10 * S, fill)
-    c.drawRect(RectF(x, 0f, x + 12 * S, h.toFloat()), fill)
-    val periodLabel = "${state.period}T"
-    drawCentered(c, periodLabel, x + 26 * S, h / 2f, periodPaint)
-    drawCentered(c, MatchState.formatClock(clockMs), x + 26 * S + (clockW - 26 * S) / 2, h / 2f, clockPaint)
+    c.drawRoundRect(RectF(x, 0f, w.toFloat(), h.toFloat()), radius, radius, fill)
+    c.drawRect(RectF(x, 0f, x + radius, h.toFloat()), fill) // esquina izquierda recta
+    drawCentered(c, "${state.period}T", x + periodW / 2, h / 2f, periodPaint)
+    fill.color = SEPARATOR
+    c.drawRect(RectF(x + periodW - 1 * S, 14 * S, x + periodW + 1 * S, h - 14 * S), fill)
+    drawCentered(c, MatchState.formatClock(clockMs), x + periodW + clockW / 2, h / 2f, clockPaint)
 
     return bmp
   }
 
-  private fun drawName(c: Canvas, name: String, x: Float, width: Float, h: Int) {
-    val text = TextUtils.ellipsize(name.uppercase(), namePaint, width - 12 * S, TextUtils.TruncateAt.END).toString()
-    drawCentered(c, text, x + width / 2, h / 2f, namePaint)
+  private fun drawName(c: Canvas, name: NameLayout, x: Float, h: Int) {
+    namePaint.textSize = name.size * S
+    drawCentered(c, name.text, x + name.boxW / 2, h / 2f, namePaint)
   }
 
   private fun drawCentered(c: Canvas, text: String, cx: Float, cy: Float, paint: Paint) {

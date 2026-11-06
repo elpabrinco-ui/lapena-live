@@ -274,8 +274,9 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
 
     val bmp = renderer.render(state, clock)
     filter.setImage(bmp)
+    // El ancho cambia según los nombres: escalar según el tamaño real de la imagen.
     filter.setScale(
-      ScoreboardRenderer.WIDTH * 100f / WIDTH,
+      bmp.width / ScoreboardRenderer.S * 100f / WIDTH,
       ScoreboardRenderer.HEIGHT * 100f / HEIGHT,
     )
     filter.setPosition(BOARD_X, BOARD_Y)
