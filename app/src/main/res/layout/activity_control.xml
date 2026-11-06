@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:background="#141414"
+  android:keepScreenOn="true">
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- Código del partido -->
+    <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:gravity="center_vertical"
+      android:orientation="horizontal">
+
+      <EditText
+        android:id="@+id/etCode"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:hint="Código del partido"
+        android:imeOptions="actionDone|flagNoExtractUi"
+        android:inputType="textCapCharacters|textNoSuggestions"
+        android:maxLength="6"
+        android:singleLine="true"
+        android:textColor="#FFFFFF"
+        android:textColorHint="#888888"
+        android:textSize="22sp"
+        android:textStyle="bold" />
+
+      <TextView
+        android:id="@+id/tvSync"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:text="—"
+        android:textColor="#BBBBBB" />
+    </LinearLayout>
+
+    <!-- Modalidad -->
+    <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="8dp"
+      android:orientation="horizontal">
+
+      <Button
+        android:id="@+id/btnF7"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="F7 · 30'" />
+
+      <Button
+        android:id="@+id/btnFutsal"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_weight="1"
+        android:text="FUTSAL · 20'" />
+    </LinearLayout>
+
+    <!-- Nombres -->
+    <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="12dp"
+      android:orientation="horizontal">
+
+      <EditText
+        android:id="@+id/etHome"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:hint="Local"
+        android:imeOptions="actionDone|flagNoExtractUi"
+        android:inputType="textCapCharacters"
+        android:maxLength="14"
+        android:singleLine="true"
+        android:textColor="#FFFFFF"
+        android:textColorHint="#888888" />
+
+      <EditText
+        android:id="@+id/etAway"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:hint="Visitante"
+        android:imeOptions="actionDone|flagNoExtractUi"
+        android:inputType="textCapCharacters"
+        android:maxLength="14"
+        android:singleLine="true"
+        android:textColor="#FFFFFF"
+        android:textColorHint="#888888" />
+    </LinearLayout>
+
+    <!-- Goles -->
+    <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="8dp"
+      android:gravity="center_vertical"
+      android:orientation="horizontal">
+
+      <Button android:id="@+id/btnHomeMinus" android:layout_width="56dp" android:layout_height="72dp" android:text="−" android:textSize="24sp" />
+      <TextView android:id="@+id/tvHomeGoals" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="0" android:textColor="#FFFFFF" android:textSize="48sp" android:textStyle="bold" />
+      <Button android:id="@+id/btnHomePlus" android:layout_width="72dp" android:layout_height="72dp" android:backgroundTint="#7A1F2B" android:textColor="#FFFFFF" android:text="+" android:textSize="28sp" />
+
+      <View android:layout_width="16dp" android:layout_height="1dp" />
+
+      <Button android:id="@+id/btnAwayMinus" android:layout_width="56dp" android:layout_height="72dp" android:text="−" android:textSize="24sp" />
+      <TextView android:id="@+id/tvAwayGoals" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="0" android:textColor="#FFFFFF" android:textSize="48sp" android:textStyle="bold" />
+      <Button android:id="@+id/btnAwayPlus" android:layout_width="72dp" android:layout_height="72dp" android:backgroundTint="#7A1F2B" android:textColor="#FFFFFF" android:text="+" android:textSize="28sp" />
+    </LinearLayout>
+
+    <!-- Reloj -->
+    <TextView
+      android:id="@+id/tvClock"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="16dp"
+      android:fontFamily="monospace"
+      android:gravity="center"
+      android:text="1T  00:00"
+      android:textColor="#FFFFFF"
+      android:textSize="44sp"
+      android:textStyle="bold" />
+
+    <TextView
+      android:id="@+id/tvTimeUp"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:gravity="center"
+      android:text=""
+      android:textColor="#FFB74D" />
+
+    <Button
+      android:id="@+id/btnStartPause"
+      android:layout_width="match_parent"
+      android:layout_height="80dp"
+      android:layout_marginTop="8dp"
+      android:backgroundTint="#2E7D32"
+      android:textColor="#FFFFFF"
+      android:textSize="22sp"
+      android:textStyle="bold"
+      android:text="▶  INICIAR" />
+
+    <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="8dp"
+      android:orientation="horizontal">
+
+      <Button android:id="@+id/btnMinusMin" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="−1'" />
+      <Button android:id="@+id/btnPlusMin" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:layout_weight="1" android:text="+1'" />
+      <Button android:id="@+id/btnResetClock" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:layout_weight="1" android:text="00:00" />
+    </LinearLayout>
+
+    <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="8dp"
+      android:orientation="horizontal">
+
+      <Button android:id="@+id/btnP1" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="1T" />
+      <Button android:id="@+id/btnP2" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:layout_weight="1" android:text="2T" />
+    </LinearLayout>
+
+    <CheckBox
+      android:id="@+id/cbVisible"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="12dp"
+      android:buttonTint="#FFFFFF"
+      android:checked="true"
+      android:text="Mostrar marcador en el video"
+      android:textColor="#FFFFFF" />
+
+    <Button
+      android:id="@+id/btnNewMatch"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="16dp"
+      android:text="Nuevo partido (goles y reloj a cero)" />
+  </LinearLayout>
+</ScrollView>

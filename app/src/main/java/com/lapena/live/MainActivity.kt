@@ -4,11 +4,15 @@ import android.Manifest
 import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.KeyEvent
-import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.View
+import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -19,15 +23,15 @@ import androidx.core.content.ContextCompat
 import com.pedro.common.ConnectChecker
 import com.pedro.common.StreamingStatsReport
 import com.pedro.common.Throughput
+import com.pedro.encoder.input.gl.render.filters.`object`.ImageObjectFilterRender
 import com.pedro.encoder.input.sources.video.Camera2Source
 import com.pedro.library.rtmp.RtmpStream
 import com.pedro.library.util.QueueAwareBitrateAdapter
 import java.util.Locale
 
 /**
- * Etapa 1: transmite la cámara del celular a YouTube por RTMP, sin marca de agua.
- * Las siguientes etapas (escudo, marcador, chat) se dibujan encima del video
- * con los filtros de RootEncoder.
+ * Modo transmitir: cámara → YouTube por RTMP, con el marcador dibujado encima.
+ * El marcador lo maneja otro celular (modo control) usando el código de partido.
  */
 class MainActivity : AppCompatActivity(), ConnectChecker {
 
@@ -43,14 +47,37 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     private const val VIDEO_BITRATE = 2500 * 1000
     private const val AUDIO_BITRATE = 128 * 1000
     private const val SAMPLE_RATE = 44100
+
+    // Posición del marcador en el video, en % (arriba a la izquierda)
+    private const val BOARD_X = 2f
+    private const val BOARD_Y = 3f
   }
 
   private lateinit var stream: RtmpStream
   private lateinit var surfaceView: SurfaceView
   private lateinit var etKey: EditText
   private lateinit var tvStatus: TextView
+  private lateinit var tvCode: TextView
   private lateinit var btnStartStop: Button
+  private lateinit var saverCover: View
   private var prepared = false
+
+  // --- Marcador ---
+  private val handler = Handler(Looper.getMainLooper())
+  private lateinit var renderer: ScoreboardRenderer
+  private var boardFilter: ImageObjectFilterRender? = null
+  @Volatile private var matchState: MatchState? = null
+  private var lastDrawnKey = ""
+  private var subscriber: ScoreSync.Subscriber? = null
+  private lateinit var matchCode: String
+  @Volatile private var syncOnline = false
+
+  private val boardTick = object : Runnable {
+    override fun run() {
+      redrawBoard(force = false)
+      handler.postDelayed(this, 250)
+    }
+  }
 
   // Baja la calidad sola si la conexión se pone lenta, para que no se corte.
   private val bitrateAdapter = QueueAwareBitrateAdapter(maxBitrate = VIDEO_BITRATE + AUDIO_BITRATE) {
@@ -73,8 +100,14 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     surfaceView = findViewById(R.id.surfaceView)
     etKey = findViewById(R.id.etKey)
     tvStatus = findViewById(R.id.tvStatus)
+    tvCode = findViewById(R.id.tvCode)
     btnStartStop = findViewById(R.id.btnStartStop)
+    saverCover = findViewById(R.id.saverCover)
     val btnSwitch = findViewById<Button>(R.id.btnSwitch)
+
+    renderer = ScoreboardRenderer(this)
+    matchCode = ScoreSync.savedCode(this, createIfMissing = true)
+    updateCodeLabel()
 
     val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
     etKey.setText(prefs.getString(KEY_STREAM, ""))
@@ -86,7 +119,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
 
     surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
       override fun surfaceCreated(holder: SurfaceHolder) {
-        if (prepared && !stream.isOnPreview) stream.startPreview(surfaceView)
+        if (prepared && !stream.isOnPreview && saverCover.visibility != View.VISIBLE) startPreviewWithBoard()
       }
 
       override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -150,8 +183,123 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
       (stream.videoSource as? Camera2Source)?.switchCamera()
     }
 
+    // Modo ahorro: apaga la vista previa y oscurece la pantalla (menos calor y batería).
+    findViewById<Button>(R.id.btnSaver).setOnClickListener {
+      if (!stream.isStreaming) {
+        toast("El modo ahorro se usa mientras estás EN VIVO")
+      } else {
+        enterSaver()
+      }
+    }
+    saverCover.setOnClickListener { exitSaver() }
+
+    // Tocar el código permite cambiarlo por uno nuevo.
+    tvCode.setOnLongClickListener {
+      ScoreSync.saveCode(this, "")
+      matchCode = ScoreSync.savedCode(this, createIfMissing = true)
+      restartSubscriber()
+      toast("Código nuevo: $matchCode")
+      true
+    }
+
+    restartSubscriber()
     requestPermissionsIfNeeded()
   }
+
+  override fun onResume() {
+    super.onResume()
+    handler.post(boardTick)
+  }
+
+  override fun onPause() {
+    super.onPause()
+    handler.removeCallbacks(boardTick)
+  }
+
+  // ---------------- Marcador ----------------
+
+  private fun restartSubscriber() {
+    subscriber?.stop()
+    updateCodeLabel()
+    subscriber = ScoreSync.Subscriber(
+      code = matchCode,
+      onState = { newState ->
+        val current = matchState
+        // Ignora mensajes viejos (por ejemplo, al reconectar)
+        if (current == null || newState.sentAt >= current.sentAt) {
+          matchState = newState
+          handler.post { redrawBoard(force = true) }
+        }
+      },
+      onConnection = { online ->
+        syncOnline = online
+        handler.post { updateCodeLabel() }
+      },
+    ).also { it.start() }
+  }
+
+  private fun updateCodeLabel() {
+    val dot = if (syncOnline) "🟢" else "⚪"
+    tvCode.text = "$dot Código: $matchCode"
+  }
+
+  /** Inicia la vista previa y vuelve a poner el marcador (la librería borra los filtros al parar). */
+  private fun startPreviewWithBoard() {
+    stream.startPreview(surfaceView)
+    attachBoard()
+  }
+
+  private fun attachBoard() {
+    val filter = ImageObjectFilterRender()
+    boardFilter = filter
+    stream.getGlInterface().setFilter(filter)
+    redrawBoard(force = true)
+  }
+
+  private fun redrawBoard(force: Boolean) {
+    val filter = boardFilter ?: return
+    val state = matchState
+    if (state == null || !state.visible) {
+      if (force || lastDrawnKey != "hidden") {
+        filter.alpha = 0f
+        lastDrawnKey = "hidden"
+      }
+      return
+    }
+    val clock = state.clockNow()
+    // Solo redibuja si algo cambió (el reloj cambia una vez por segundo)
+    val key = state.toJson() + "|" + (clock / 1000)
+    if (!force && key == lastDrawnKey) return
+    lastDrawnKey = key
+
+    val bmp = renderer.render(state, clock)
+    filter.setImage(bmp)
+    filter.setScale(
+      ScoreboardRenderer.WIDTH * 100f / WIDTH,
+      ScoreboardRenderer.HEIGHT * 100f / HEIGHT,
+    )
+    filter.setPosition(BOARD_X, BOARD_Y)
+    filter.alpha = 1f
+  }
+
+  // ---------------- Modo ahorro ----------------
+
+  private fun enterSaver() {
+    saverCover.visibility = View.VISIBLE
+    if (stream.isOnPreview) stream.stopPreview()
+    window.attributes = window.attributes.apply { screenBrightness = 0.01f }
+  }
+
+  private fun exitSaver() {
+    if (saverCover.visibility != View.VISIBLE) return
+    saverCover.visibility = View.GONE
+    window.attributes = window.attributes.apply {
+      screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+    }
+    if (prepared && !stream.isOnPreview && surfaceView.holder.surface.isValid) startPreviewWithBoard()
+  }
+
+  // ---------------- Transmisión ----------------
 
   private fun saveKey(key: String) {
     if (key.isNotEmpty()) getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_STREAM, key).apply()
@@ -184,13 +332,14 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
       return
     }
     if (surfaceView.holder.surface.isValid && !stream.isOnPreview) {
-      stream.startPreview(surfaceView)
+      startPreviewWithBoard()
     }
   }
 
   private fun stopStreaming(message: String) {
-    if (stream.isStreaming) stream.stopStream()
     runOnUiThread {
+      exitSaver()
+      if (stream.isStreaming) stream.stopStream()
       btnStartStop.setText(R.string.start)
       tvStatus.text = message
     }
@@ -198,6 +347,8 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
 
   override fun onDestroy() {
     super.onDestroy()
+    handler.removeCallbacksAndMessages(null)
+    subscriber?.stop()
     if (stream.isStreaming) stream.stopStream()
     stream.release()
   }

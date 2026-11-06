@@ -6,24 +6,36 @@
   <uses-permission android:name="android.permission.CAMERA" />
   <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-  <uses-feature android:name="android.hardware.camera" android:required="true" />
+  <uses-feature android:name="android.hardware.camera" android:required="false" />
 
   <application
     android:allowBackup="false"
     android:label="@string/app_name"
-    android:icon="@android:drawable/presence_video_online"
+    android:icon="@drawable/crest"
     android:theme="@style/Theme.LaPenaLive">
 
     <activity
-      android:name=".MainActivity"
+      android:name=".StartActivity"
       android:exported="true"
-      android:screenOrientation="sensorLandscape"
-      android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
-      android:windowSoftInputMode="adjustPan">
+      android:screenOrientation="portrait">
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
     </activity>
+
+    <activity
+      android:name=".MainActivity"
+      android:exported="false"
+      android:screenOrientation="sensorLandscape"
+      android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+      android:windowSoftInputMode="adjustPan" />
+
+    <activity
+      android:name=".ControlActivity"
+      android:exported="false"
+      android:screenOrientation="portrait"
+      android:theme="@style/Theme.LaPenaControl"
+      android:windowSoftInputMode="adjustResize" />
   </application>
 </manifest>
