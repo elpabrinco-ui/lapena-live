@@ -67,6 +67,7 @@ class ScoreboardRenderer(context: Context) {
     textAlign = Paint.Align.CENTER
   }
   private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+  private val crestPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
   /** Nombre ya preparado: texto, tamaño de letra y ancho de su caja (en px reales). */
   private data class NameLayout(val text: String, val size: Float, val boxW: Float)
@@ -110,7 +111,7 @@ class ScoreboardRenderer(context: Context) {
     // Escudo
     crest?.let {
       val pad = 4 * S
-      c.drawBitmap(it, null, RectF(pad, pad, crestW - pad, h - pad), fill)
+      c.drawBitmap(it, null, RectF(pad, pad, crestW - pad, h - pad), crestPaint)
     }
 
     var x = crestW
@@ -155,7 +156,8 @@ class ScoreboardRenderer(context: Context) {
     crest?.let {
       val left = (videoW - crestSize) / 2
       val top = videoH * 0.07f
-      c.drawBitmap(it, null, RectF(left, top, left + crestSize, top + crestSize), fill)
+      // Pincel propio: sin la transparencia de la franja oscura
+      c.drawBitmap(it, null, RectF(left, top, left + crestSize, top + crestSize), crestPaint)
     }
 
     val title = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
