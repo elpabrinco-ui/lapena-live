@@ -10,8 +10,10 @@ android {
     applicationId = "com.lapena.live"
     minSdk = 24
     targetSdk = 36
-    versionCode = 9
-    versionName = "0.9-etapa3"
+    // En GitHub, cada compilación tiene un número que siempre sube: se usa como versión.
+    val build = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+    versionCode = build
+    versionName = "1.$build"
   }
 
   signingConfigs {

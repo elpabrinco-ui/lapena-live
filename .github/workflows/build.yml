@@ -41,5 +41,5 @@ jobs:
           gh release delete ultima-version --yes --cleanup-tag || true
           gh release create ultima-version LaPenaLive.apk \
             --title "La Peña Live – última versión" \
-            --notes "Build automático del commit ${GITHUB_SHA::7}. Descargá LaPenaLive.apk e instalalo en el celular." \
+            --notes "Build automático del commit ${GITHUB_SHA::7}. Descargá LaPenaLive.apk e instalalo en el celular. [versionCode=${GITHUB_RUN_NUMBER}]" \
             --prerelease

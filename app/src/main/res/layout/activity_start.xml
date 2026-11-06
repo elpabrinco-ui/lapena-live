@@ -7,6 +7,17 @@
   android:orientation="vertical"
   android:padding="32dp">
 
+  <Button
+    android:id="@+id/btnUpdate"
+    android:layout_width="match_parent"
+    android:layout_height="64dp"
+    android:layout_marginBottom="16dp"
+    android:backgroundTint="#2E7D32"
+    android:textColor="#FFFFFF"
+    android:textStyle="bold"
+    android:visibility="gone"
+    android:text="⬇  NUEVA VERSIÓN · DESCARGAR" />
+
   <ImageView
     android:layout_width="140dp"
     android:layout_height="140dp"
@@ -53,4 +64,12 @@
     android:gravity="center"
     android:textColor="#FFC9C9"
     android:text="Un celular transmite. Otro celular maneja el marcador con el mismo código de partido." />
+
+  <TextView
+    android:id="@+id/tvVersion"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="12dp"
+    android:textColor="#B07A82"
+    android:textSize="12sp" />
 </LinearLayout>
