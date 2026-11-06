@@ -166,7 +166,7 @@ class LineupActivity : AppCompatActivity() {
     val lines = MatchState.parseFormation(formation, outfield)
     val labels = ArrayList<String>().apply { add("Arquero") }
     lines.forEachIndexed { li, count ->
-      repeat(count) { k -> add("${MatchState.lineLabel(li, lines.size)} ${k + 1}") }
+      repeat(count) { k -> labels.add("${MatchState.lineLabel(li, lines.size)} ${k + 1}") }
     }
     for (i in 0 until rows.childCount) {
       val tag = (rows.getChildAt(i) as LinearLayout).getChildAt(0) as TextView
