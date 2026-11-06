@@ -89,7 +89,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   private data class ChatItem(val msg: YouTubeApi.ChatMessage, val at: Long, val n: Long)
   private val chatItems = ArrayList<ChatItem>()
   private var chatCounter = 0L
-  private var lastChatKey = 
+  private var lastChatKey = ""
 
   // --- Marcador ---
   private val handler = Handler(Looper.getMainLooper())
