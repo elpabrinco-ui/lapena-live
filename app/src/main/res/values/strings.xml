@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">La Peña Live</string>
+  <string name="hint_key">Clave de transmisión de YouTube</string>
+  <string name="start">EN VIVO ▶</string>
+  <string name="stop">DETENER ■</string>
+  <string name="switch_camera">Cambiar cámara</string>
+</resources>
