@@ -24,6 +24,7 @@ class ScoreboardRenderer(context: Context) {
     // Tamaños "lógicos" en píxeles del video 1280x720
     const val HEIGHT = 64
     const val S = 2f // factor de nitidez
+    const val CHAT_W = 400
 
     private const val CREST_W = 64f
     private const val NAME_MIN_W = 100f
@@ -192,6 +193,62 @@ class ScoreboardRenderer(context: Context) {
       drawCentered(c, result, cx, cy, score)
       drawCentered(c, home, cx - resultHalf - gap - score.measureText(home) / 2, cy, score)
       drawCentered(c, away, cx + resultHalf + gap + score.measureText(away) / 2, cy, score)
+    }
+    return bmp
+  }
+
+  // ---------------- Chat ----------------
+
+  private val chatAuthorPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = Color.parseColor("#FFB3B3")
+    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+    textSize = 17 * S
+  }
+  private val chatTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = Color.WHITE
+    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+    textSize = 19 * S
+  }
+
+  /**
+   * Últimos comentarios, uno debajo del otro (el más nuevo abajo).
+   * Ancho fijo [CHAT_W] en px del video; el alto depende de los mensajes.
+   */
+  fun renderChat(messages: List<YouTubeApi.ChatMessage>): Bitmap? {
+    if (messages.isEmpty()) return null
+    val w = (CHAT_W * S).toInt()
+    val pad = 10 * S
+    val gap = 6 * S
+    val textW = (w - pad * 2).toInt()
+
+    val layouts = messages.map { m ->
+      val author = TextUtils.ellipsize(m.author, chatAuthorPaint, textW.toFloat(), TextUtils.TruncateAt.END).toString()
+      val body = android.text.StaticLayout.Builder
+        .obtain(m.text, 0, m.text.length, chatTextPaint, textW)
+        .setMaxLines(2)
+        .setEllipsize(TextUtils.TruncateAt.END)
+        .build()
+      author to body
+    }
+    val authorH = chatAuthorPaint.fontSpacing
+    val boxHeights = layouts.map { (_, body) -> pad * 2 + authorH + body.height }
+    val h = (boxHeights.sum() + gap * (layouts.size - 1)).toInt()
+
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    var y = 0f
+    layouts.forEachIndexed { i, (author, body) ->
+      val boxH = boxHeights[i]
+      fill.color = DARK
+      c.drawRoundRect(RectF(0f, y, w.toFloat(), y + boxH), 10 * S, 10 * S, fill)
+      fill.color = MAROON
+      c.drawRect(RectF(0f, y + 8 * S, 5 * S, y + boxH - 8 * S), fill) // barrita bordó
+      c.drawText(author, pad, y + pad - chatAuthorPaint.ascent(), chatAuthorPaint)
+      c.save()
+      c.translate(pad, y + pad + authorH)
+      body.draw(c)
+      c.restore()
+      y += boxH + gap
     }
     return bmp
   }

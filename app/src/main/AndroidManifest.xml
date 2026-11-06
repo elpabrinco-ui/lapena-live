@@ -37,5 +37,12 @@
       android:screenOrientation="portrait"
       android:theme="@style/Theme.LaPenaControl"
       android:windowSoftInputMode="adjustResize" />
+
+    <activity
+      android:name=".BroadcastsActivity"
+      android:exported="false"
+      android:screenOrientation="portrait"
+      android:theme="@style/Theme.LaPenaControl"
+      android:windowSoftInputMode="adjustResize" />
   </application>
 </manifest>

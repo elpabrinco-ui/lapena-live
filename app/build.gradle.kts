@@ -10,8 +10,8 @@ android {
     applicationId = "com.lapena.live"
     minSdk = 24
     targetSdk = 36
-    versionCode = 7
-    versionName = "0.7-etapa2"
+    versionCode = 8
+    versionName = "0.8-etapa3"
   }
 
   signingConfigs {
@@ -42,4 +42,5 @@ kotlin {
 dependencies {
   implementation("com.github.pedroSG94.RootEncoder:library:2.8.1")
   implementation("androidx.appcompat:appcompat:1.6.1")
+  implementation("com.google.android.gms:play-services-auth:21.5.1")
 }

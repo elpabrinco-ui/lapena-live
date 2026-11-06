@@ -16,5 +16,8 @@ class StartActivity : AppCompatActivity() {
     findViewById<Button>(R.id.btnModeControl).setOnClickListener {
       startActivity(Intent(this, ControlActivity::class.java))
     }
+    findViewById<Button>(R.id.btnModeMatches).setOnClickListener {
+      startActivity(Intent(this, BroadcastsActivity::class.java))
+    }
   }
 }

@@ -11,17 +11,31 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent" />
 
-  <!-- Top: stream key + status -->
+  <!-- Top: match + stream key + status -->
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_gravity="top"
+    android:orientation="vertical">
+
   <LinearLayout
     android:id="@+id/topPanel"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_gravity="top"
     android:layout_margin="8dp"
     android:background="@drawable/panel_bg"
     android:orientation="horizontal"
     android:padding="8dp"
     android:gravity="center_vertical">
+
+    <Button
+      android:id="@+id/btnMatch"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginEnd="8dp"
+      android:backgroundTint="#7A1F2B"
+      android:textColor="@android:color/white"
+      android:text="📅 PARTIDO" />
 
     <EditText
       android:id="@+id/etKey"
@@ -50,6 +64,20 @@
       android:text="Sin transmitir"
       android:textColor="@android:color/white"
       android:textSize="14sp" />
+  </LinearLayout>
+
+  <TextView
+    android:id="@+id/tvMatch"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="8dp"
+    android:background="@drawable/panel_bg"
+    android:paddingStart="10dp"
+    android:paddingEnd="10dp"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp"
+    android:textColor="@android:color/white"
+    android:visibility="gone" />
   </LinearLayout>
 
   <!-- Bottom left: match code for the control phone -->

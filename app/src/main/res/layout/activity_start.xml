@@ -35,6 +35,17 @@
     android:textStyle="bold"
     android:text="🎛  CONTROLAR MARCADOR" />
 
+  <Button
+    android:id="@+id/btnModeMatches"
+    android:layout_width="match_parent"
+    android:layout_height="64dp"
+    android:layout_marginTop="16dp"
+    android:backgroundTint="#C62828"
+    android:textColor="#FFFFFF"
+    android:textSize="16sp"
+    android:textStyle="bold"
+    android:text="📅  PARTIDOS EN YOUTUBE" />
+
   <TextView
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"

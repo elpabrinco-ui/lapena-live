@@ -2,6 +2,7 @@ package com.lapena.live
 
 import android.Manifest
 import android.content.ClipboardManager
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
@@ -30,6 +31,8 @@ import com.pedro.encoder.input.sources.video.Camera2Source
 import com.pedro.library.rtmp.RtmpStream
 import com.pedro.library.util.QueueAwareBitrateAdapter
 import java.util.Locale
+import kotlin.concurrent.thread
+import kotlin.math.max
 
 /**
  * Modo transmitir: cámara → YouTube por RTMP, con el marcador dibujado encima.
@@ -55,6 +58,11 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     private const val BOARD_Y = 3f
 
     private const val END_CARD_SECONDS = 30
+
+    // Chat: cada cuánto consultar (cuida el cupo diario de la API) y cuánto tiempo se ve cada mensaje
+    private const val CHAT_POLL_MIN_MS = 8000L
+    private const val CHAT_SHOW_MS = 20_000L
+    private const val CHAT_MAX_VISIBLE = 3
   }
 
   private lateinit var stream: RtmpStream
@@ -69,7 +77,19 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
 
   // Pantalla de cierre
   private var endCardFilter: ImageObjectFilterRender? = null
+  private var endCardBitmap: android.graphics.Bitmap? = null
   private var endCardRemaining = 0
+
+  // Partido de YouTube elegido y chat
+  private var selection: Selection? = null
+  private lateinit var tvMatch: TextView
+  private lateinit var btnMatch: Button
+  private var chatFilter: ImageObjectFilterRender? = null
+  private var chatPoller: ChatPoller? = null
+  private data class ChatItem(val msg: YouTubeApi.ChatMessage, val at: Long, val n: Long)
+  private val chatItems = ArrayList<ChatItem>()
+  private var chatCounter = 0L
+  private var lastChatKey = 
 
   // --- Marcador ---
   private val handler = Handler(Looper.getMainLooper())
@@ -84,6 +104,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   private val boardTick = object : Runnable {
     override fun run() {
       redrawBoard(force = false)
+      redrawChat(force = false)
       handler.postDelayed(this, 250)
     }
   }
@@ -113,6 +134,20 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     btnStartStop = findViewById(R.id.btnStartStop)
     saverCover = findViewById(R.id.saverCover)
     val btnSwitch = findViewById<Button>(R.id.btnSwitch)
+    tvMatch = findViewById(R.id.tvMatch)
+    btnMatch = findViewById(R.id.btnMatch)
+    btnMatch.setOnClickListener {
+      startActivity(Intent(this, BroadcastsActivity::class.java)
+        .putExtra(BroadcastsActivity.EXTRA_FROM_STREAM, true))
+    }
+    tvMatch.setOnLongClickListener {
+      if (!stream.isStreaming) {
+        Selection.clear(this)
+        loadSelection()
+        toast("Partido quitado. Se usa la clave manual.")
+      }
+      true
+    }
 
     renderer = ScoreboardRenderer(this)
     matchCode = ScoreSync.savedCode(this, createIfMissing = true)
@@ -185,6 +220,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         btnStartStop.setText(R.string.stop)
         tvStatus.text = "Conectando…"
         updateLiveUi()
+        startChat()
       } else if (endCardFilter != null) {
         // Ya está mostrando la pantalla de cierre: cortar ya.
         stopStreaming("Transmisión finalizada")
@@ -231,6 +267,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
 
   override fun onResume() {
     super.onResume()
+    if (!stream.isStreaming) loadSelection()
     handler.post(boardTick)
   }
 
@@ -266,17 +303,27 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     tvCode.text = "$dot Código: $matchCode"
   }
 
-  /** Inicia la vista previa y vuelve a poner el marcador (la librería borra los filtros al parar). */
+  /** Inicia la vista previa y vuelve a poner los gráficos (la librería borra los filtros al parar). */
   private fun startPreviewWithBoard() {
     stream.startPreview(surfaceView)
-    attachBoard()
+    attachOverlays()
   }
 
-  private fun attachBoard() {
-    val filter = ImageObjectFilterRender()
-    boardFilter = filter
-    stream.getGlInterface().setFilter(filter)
+  /** Marcador, chat y (si está activa) pantalla final, en ese orden: lo último queda arriba. */
+  private fun attachOverlays() {
+    val gl = stream.getGlInterface()
+    gl.clearFilters()
+    val board = ImageObjectFilterRender().also { boardFilter = it }
+    val chat = ImageObjectFilterRender().also { it.alpha = 0f; chatFilter = it }
+    gl.addFilter(board)
+    gl.addFilter(chat)
+    endCardBitmap?.let { bmp ->
+      val card = newEndCardFilter(bmp)
+      endCardFilter = card
+      gl.addFilter(card)
+    }
     redrawBoard(force = true)
+    redrawChat(force = true)
   }
 
   private fun redrawBoard(force: Boolean) {
@@ -310,10 +357,9 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
 
   private fun startEndCard() {
     exitSaver()
-    val filter = ImageObjectFilterRender()
-    filter.setImage(renderer.renderEndCard(matchState, WIDTH, HEIGHT))
-    filter.setScale(100f, 100f)
-    filter.setPosition(0f, 0f)
+    val bmp = renderer.renderEndCard(matchState, WIDTH, HEIGHT)
+    endCardBitmap = bmp
+    val filter = newEndCardFilter(bmp)
     endCardFilter = filter
     stream.getGlInterface().addFilter(filter)   // va encima del video y del marcador
     (stream.audioSource as? MicrophoneSource)?.mute()
@@ -321,11 +367,18 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     handler.post(endCardTick)
   }
 
+  private fun newEndCardFilter(bmp: android.graphics.Bitmap) = ImageObjectFilterRender().apply {
+    setImage(bmp.copy(bmp.config ?: android.graphics.Bitmap.Config.ARGB_8888, false))
+    setScale(100f, 100f)
+    setPosition(0f, 0f)
+  }
+
   private val endCardTick = object : Runnable {
     override fun run() {
       if (endCardFilter == null) return
       if (endCardRemaining <= 0) {
         stopStreaming("Transmisión finalizada")
+        finishOnYouTube()
         return
       }
       tvStatus.text = "Pantalla final · se corta en $endCardRemaining s"
@@ -339,6 +392,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     handler.removeCallbacks(endCardTick)
     endCardFilter?.let { stream.getGlInterface().removeFilter(it) }
     endCardFilter = null
+    endCardBitmap = null
     (stream.audioSource as? MicrophoneSource)?.unMute()
   }
 
@@ -347,6 +401,132 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     val live = stream.isStreaming
     etKey.visibility = if (live) View.GONE else View.VISIBLE
     btnPaste.visibility = if (live) View.GONE else View.VISIBLE
+    btnMatch.visibility = if (live) View.GONE else View.VISIBLE
+    tvMatch.visibility = if (live || selection == null) View.GONE else View.VISIBLE
+  }
+
+  // ---------------- Partido de YouTube ----------------
+
+  private fun loadSelection() {
+    selection = Selection.load(this)
+    val sel = selection
+    if (sel != null) {
+      etKey.setText(getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_STREAM, ""))
+      val chat = if (sel.liveChatId != null) " · 💬 chat" else ""
+      tvMatch.text = "📅 ${sel.title}$chat   (mantené apretado para quitar)"
+    }
+    updateLiveUi()
+  }
+
+  /** Al terminar con la pantalla final: cierra el vivo en YouTube (como "Finalizar transmisión"). */
+  private fun finishOnYouTube() {
+    val sel = selection ?: return
+    thread {
+      val token = YouTubeAuth.getTokenSilently(this)
+      val msg = if (token == null) {
+        "Finalizá el vivo en YouTube Studio (falta iniciar sesión)"
+      } else try {
+        YouTubeApi.complete(token, sel.broadcastId)
+        "Vivo finalizado en YouTube ✓"
+      } catch (e: YouTubeException) {
+        if (e.reason == "redundantTransition") "Vivo finalizado en YouTube ✓" else "No se pudo finalizar en YouTube: ${e.message}"
+      } catch (e: Exception) {
+        "No se pudo finalizar en YouTube: ${e.message}"
+      }
+      Selection.clear(this)
+      runOnUiThread {
+        toast(msg)
+        loadSelection()
+      }
+    }
+  }
+
+  // ---------------- Chat ----------------
+
+  private fun startChat() {
+    stopChat()
+    val chatId = selection?.liveChatId ?: return
+    chatPoller = ChatPoller(chatId).also { it.start() }
+  }
+
+  private fun stopChat() {
+    chatPoller?.running = false
+    chatPoller = null
+    chatItems.clear()
+    redrawChat(force = true)
+  }
+
+  private inner class ChatPoller(private val chatId: String) {
+    @Volatile var running = true
+
+    fun start() = thread(name = "chat-poller", isDaemon = true) {
+      var page: String? = null
+      var first = true
+      var warnedLogin = false
+      while (running) {
+        var wait = CHAT_POLL_MIN_MS
+        try {
+          val token = YouTubeAuth.getTokenSilently(this@MainActivity)
+          if (token == null) {
+            if (!warnedLogin) toast("Chat: conectá la cuenta en 📅 PARTIDO")
+            warnedLogin = true
+            wait = 30_000
+          } else {
+            val res = YouTubeApi.chatMessages(token, chatId, page)
+            page = res.nextPageToken
+            // La primera vez llegan los mensajes viejos: mostrar solo los 2 últimos.
+            val msgs = if (first) res.messages.takeLast(2) else res.messages
+            first = false
+            if (msgs.isNotEmpty()) handler.post { addChat(msgs) }
+            wait = max(res.pollMs, CHAT_POLL_MIN_MS)
+          }
+        } catch (e: YouTubeException) {
+          if (e.reason == "liveChatEnded" || e.reason == "liveChatNotFound" ||
+            e.reason == "liveChatDisabled" || e.reason == "quotaExceeded") {
+            toast("Chat: ${e.message}")
+            running = false
+          }
+          wait = 15_000
+        } catch (e: Exception) {
+          wait = 10_000   // sin señal: reintenta
+        }
+        if (running) try { Thread.sleep(wait) } catch (e: InterruptedException) { }
+      }
+    }
+  }
+
+  private fun addChat(msgs: List<YouTubeApi.ChatMessage>) {
+    if (chatPoller == null) return
+    val now = System.currentTimeMillis()
+    // Si llegan varios juntos, se escalonan un poco para que se puedan leer.
+    msgs.takeLast(CHAT_MAX_VISIBLE).forEachIndexed { i, m ->
+      chatItems.add(ChatItem(m, now + i * 1500L, chatCounter++))
+    }
+    while (chatItems.size > 10) chatItems.removeAt(0)
+    redrawChat(force = false)
+  }
+
+  private fun redrawChat(force: Boolean) {
+    val filter = chatFilter ?: return
+    val now = System.currentTimeMillis()
+    val enabled = matchState?.chat ?: true
+    val visible = if (!enabled) emptyList() else chatItems
+      .filter { it.at <= now && now - it.at < CHAT_SHOW_MS }
+      .takeLast(CHAT_MAX_VISIBLE)
+    val key = visible.joinToString(",") { it.n.toString() }
+    if (!force && key == lastChatKey) return
+    lastChatKey = key
+
+    val bmp = renderer.renderChat(visible.map { it.msg })
+    if (bmp == null) {
+      filter.alpha = 0f
+      return
+    }
+    val hPct = bmp.height / ScoreboardRenderer.S * 100f / HEIGHT
+    filter.setImage(bmp)
+    filter.setScale(ScoreboardRenderer.CHAT_W * 100f / WIDTH, hPct)
+    filter.setPosition(2f, 100f - hPct - 4f)
+    filter.alpha = 1f
   }
 
   // ---------------- Modo ahorro ----------------
@@ -407,6 +587,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     runOnUiThread {
       exitSaver()
       removeEndCard()
+      stopChat()
       if (stream.isStreaming) stream.stopStream()
       btnStartStop.setText(R.string.start)
       tvStatus.text = message
@@ -418,6 +599,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     super.onDestroy()
     handler.removeCallbacksAndMessages(null)
     subscriber?.stop()
+    chatPoller?.running = false
     if (stream.isStreaming) stream.stopStream()
     stream.release()
   }

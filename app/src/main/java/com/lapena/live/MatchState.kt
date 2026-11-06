@@ -17,6 +17,7 @@ data class MatchState(
   val elapsedMs: Long = 0,          // tiempo del reloj al momento de enviar
   val sentAt: Long = 0,             // hora (epoch ms) del envío
   val visible: Boolean = true,
+  val chat: Boolean = true,         // mostrar comentarios de YouTube en el video
 ) {
   /** Tiempo del reloj ahora, usando la hora del celular (ambos celulares usan hora de red). */
   fun clockNow(now: Long = System.currentTimeMillis()): Long {
@@ -31,6 +32,7 @@ data class MatchState(
     put("p", period); put("pm", periodMinutes)
     put("run", running); put("el", elapsedMs); put("at", sentAt)
     put("vis", visible)
+    put("chat", chat)
   }.toString()
 
   companion object {
@@ -47,6 +49,7 @@ data class MatchState(
         elapsedMs = o.optLong("el"),
         sentAt = o.optLong("at"),
         visible = o.optBoolean("vis", true),
+        chat = o.optBoolean("chat", true),
       )
     } catch (e: Exception) {
       null

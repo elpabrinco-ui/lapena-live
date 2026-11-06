@@ -184,6 +184,15 @@
       android:text="Mostrar marcador en el video"
       android:textColor="#FFFFFF" />
 
+    <CheckBox
+      android:id="@+id/cbChat"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:buttonTint="#FFFFFF"
+      android:checked="true"
+      android:text="Mostrar comentarios de YouTube en el video"
+      android:textColor="#FFFFFF" />
+
     <Button
       android:id="@+id/btnNewMatch"
       android:layout_width="match_parent"

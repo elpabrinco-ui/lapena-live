@@ -78,6 +78,9 @@ class ControlActivity : AppCompatActivity() {
     etHome.setText(state.home)
     etAway.setText(state.away)
     cbVisible.isChecked = state.visible
+    val cbChat = findViewById<CheckBox>(R.id.cbChat)
+    cbChat.isChecked = state.chat
+    cbChat.setOnCheckedChangeListener { _, checked -> change { copy(chat = checked) } }
 
     etCode.addTextChangedListener(simpleWatcher {
       val code = etCode.text.toString().trim().uppercase()
