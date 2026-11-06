@@ -538,7 +538,11 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     }
     val away = matchState?.away?.takeIf { it.isNotBlank() && it != "RIVAL" && it != "VISITA" }
     val etTitle = EditText(this).apply {
-      setText(if (away != null) "La Peña FC vs ${away.split(" ").joinToString(" ") { w -> w.lowercase().replaceFirstChar { it.uppercase() } }}" else "La Peña FC en vivo")
+      setText(if (away != null) "La Peña FC vs ${away.split(" ").joinToString(" ") { w ->
+        // Siglas cortas (FCK, FC, AB) quedan en mayúsculas; el resto, con mayúscula inicial.
+        if (w.length <= 3 && w.all { !it.isLetter() || it.isUpperCase() }) w
+        else w.lowercase().replaceFirstChar { it.uppercase() }
+      }}" else "La Peña FC en vivo")
       isSingleLine = true
     }
     val rg = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
