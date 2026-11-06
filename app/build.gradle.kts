@@ -10,8 +10,8 @@ android {
     applicationId = "com.lapena.live"
     minSdk = 24
     targetSdk = 36
-    versionCode = 4
-    versionName = "0.4-etapa2"
+    versionCode = 5
+    versionName = "0.5-etapa2"
   }
 
   signingConfigs {

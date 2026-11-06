@@ -138,6 +138,51 @@ class ScoreboardRenderer(context: Context) {
     return bmp
   }
 
+  /**
+   * Pantalla de cierre a tamaño completo del video (1280x720):
+   * escudo, "¡Gracias por acompañar a La Peña!" y el resultado final.
+   */
+  fun renderEndCard(state: MatchState?, videoW: Int, videoH: Int): Bitmap {
+    val bmp = Bitmap.createBitmap(videoW, videoH, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    c.drawColor(MAROON)
+
+    // Franja oscura abajo para el resultado
+    fill.color = Color.parseColor("#33000000")
+    c.drawRect(0f, videoH * 0.70f, videoW.toFloat(), videoH.toFloat(), fill)
+
+    val crestSize = videoH * 0.36f
+    crest?.let {
+      val left = (videoW - crestSize) / 2
+      val top = videoH * 0.07f
+      c.drawBitmap(it, null, RectF(left, top, left + crestSize, top + crestSize), fill)
+    }
+
+    val title = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.WHITE
+      typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+      textAlign = Paint.Align.CENTER
+      textSize = videoH * 0.065f
+    }
+    drawCentered(c, "¡GRACIAS POR ACOMPAÑAR A LA PEÑA!", videoW / 2f, videoH * 0.55f, title)
+
+    val sub = Paint(title).apply {
+      color = Color.parseColor("#FFC9C9")
+      typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+      textSize = videoH * 0.04f
+    }
+    drawCentered(c, "Nos vemos en el próximo partido", videoW / 2f, videoH * 0.63f, sub)
+
+    if (state != null) {
+      val score = Paint(title).apply { textSize = videoH * 0.065f }
+      val line = "${state.home.uppercase()}   ${state.homeGoals} - ${state.awayGoals}   ${state.away.uppercase()}"
+      val fitted = TextUtils.ellipsize(line, TextPaint(score), videoW * 0.92f, TextUtils.TruncateAt.END).toString()
+      drawCentered(c, "FINAL", videoW / 2f, videoH * 0.77f, sub)
+      drawCentered(c, fitted, videoW / 2f, videoH * 0.87f, score)
+    }
+    return bmp
+  }
+
   private fun drawName(c: Canvas, name: NameLayout, x: Float, h: Int) {
     namePaint.textSize = name.size * S
     drawCentered(c, name.text, x + name.boxW / 2, h / 2f, namePaint)

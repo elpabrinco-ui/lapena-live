@@ -18,8 +18,10 @@ import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.pedro.encoder.input.sources.audio.MicrophoneSource
 import com.pedro.common.ConnectChecker
 import com.pedro.common.StreamingStatsReport
 import com.pedro.common.Throughput
@@ -51,6 +53,8 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     // Posición del marcador en el video, en % (arriba a la izquierda)
     private const val BOARD_X = 2f
     private const val BOARD_Y = 3f
+
+    private const val END_CARD_SECONDS = 30
   }
 
   private lateinit var stream: RtmpStream
@@ -60,7 +64,12 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   private lateinit var tvCode: TextView
   private lateinit var btnStartStop: Button
   private lateinit var saverCover: View
+  private lateinit var btnPaste: Button
   private var prepared = false
+
+  // Pantalla de cierre
+  private var endCardFilter: ImageObjectFilterRender? = null
+  private var endCardRemaining = 0
 
   // --- Marcador ---
   private val handler = Handler(Looper.getMainLooper())
@@ -132,7 +141,8 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     })
 
     // "PEGAR": toma la clave del portapapeles, sin usar el teclado.
-    findViewById<Button>(R.id.btnPaste).setOnClickListener {
+    btnPaste = findViewById(R.id.btnPaste)
+    btnPaste.setOnClickListener {
       val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
       val text = clipboard.primaryClip?.takeIf { it.itemCount > 0 }
         ?.getItemAt(0)?.coerceToText(this)?.toString()?.trim().orEmpty()
@@ -174,8 +184,21 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         stream.startStream(YOUTUBE_RTMP + key)
         btnStartStop.setText(R.string.stop)
         tvStatus.text = "Conectando…"
+        updateLiveUi()
+      } else if (endCardFilter != null) {
+        // Ya está mostrando la pantalla de cierre: cortar ya.
+        stopStreaming("Transmisión finalizada")
       } else {
-        stopStreaming("Transmisión detenida")
+        AlertDialog.Builder(this)
+          .setTitle("Terminar transmisión")
+          .setItems(arrayOf(
+            "Cerrar con pantalla final ($END_CARD_SECONDS s)",
+            "Cortar ahora",
+          )) { _, which ->
+            if (which == 0) startEndCard() else stopStreaming("Transmisión detenida")
+          }
+          .setNegativeButton("Seguir en vivo", null)
+          .show()
       }
     }
 
@@ -283,6 +306,49 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     filter.alpha = 1f
   }
 
+  // ---------------- Pantalla de cierre ----------------
+
+  private fun startEndCard() {
+    exitSaver()
+    val filter = ImageObjectFilterRender()
+    filter.setImage(renderer.renderEndCard(matchState, WIDTH, HEIGHT))
+    filter.setScale(100f, 100f)
+    filter.setPosition(0f, 0f)
+    endCardFilter = filter
+    stream.getGlInterface().addFilter(filter)   // va encima del video y del marcador
+    (stream.audioSource as? MicrophoneSource)?.mute()
+    endCardRemaining = END_CARD_SECONDS
+    handler.post(endCardTick)
+  }
+
+  private val endCardTick = object : Runnable {
+    override fun run() {
+      if (endCardFilter == null) return
+      if (endCardRemaining <= 0) {
+        stopStreaming("Transmisión finalizada")
+        return
+      }
+      tvStatus.text = "Pantalla final · se corta en $endCardRemaining s"
+      btnStartStop.text = "CORTAR YA ■"
+      endCardRemaining--
+      handler.postDelayed(this, 1000)
+    }
+  }
+
+  private fun removeEndCard() {
+    handler.removeCallbacks(endCardTick)
+    endCardFilter?.let { stream.getGlInterface().removeFilter(it) }
+    endCardFilter = null
+    (stream.audioSource as? MicrophoneSource)?.unMute()
+  }
+
+  private fun updateLiveUi() {
+    // En vivo: ocultar la clave para que no tape el marcador en la vista previa.
+    val live = stream.isStreaming
+    etKey.visibility = if (live) View.GONE else View.VISIBLE
+    btnPaste.visibility = if (live) View.GONE else View.VISIBLE
+  }
+
   // ---------------- Modo ahorro ----------------
 
   private fun enterSaver() {
@@ -340,9 +406,11 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   private fun stopStreaming(message: String) {
     runOnUiThread {
       exitSaver()
+      removeEndCard()
       if (stream.isStreaming) stream.stopStream()
       btnStartStop.setText(R.string.start)
       tvStatus.text = message
+      updateLiveUi()
     }
   }
 
@@ -361,7 +429,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   }
 
   override fun onConnectionSuccess() {
-    runOnUiThread { tvStatus.text = "● EN VIVO" }
+    runOnUiThread { if (endCardFilter == null) tvStatus.text = "● EN VIVO" }
   }
 
   override fun onConnectionFailed(reason: String) {
@@ -387,7 +455,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   override fun onStreamingStats(report: StreamingStatsReport) {
     runOnUiThread {
       bitrateAdapter.onStreamingStats(report)
-      if (stream.isStreaming && report.throughput != Throughput.UNKNOWN) {
+      if (stream.isStreaming && endCardFilter == null && report.throughput != Throughput.UNKNOWN) {
         tvStatus.text = String.format(
           Locale.getDefault(), "● EN VIVO  %.1f Mb/s", report.smoothedBitrate / 1_000_000f
         )
