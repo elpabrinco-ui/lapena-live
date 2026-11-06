@@ -176,11 +176,22 @@ class ScoreboardRenderer(context: Context) {
     drawCentered(c, "Nos vemos en el próximo partido", videoW / 2f, videoH * 0.63f, sub)
 
     if (state != null) {
+      // "2 - 1" fijo en el centro; cada nombre pegado a su lado.
       val score = Paint(title).apply { textSize = videoH * 0.065f }
-      val line = "${state.home.uppercase()}   ${state.homeGoals} - ${state.awayGoals}   ${state.away.uppercase()}"
-      val fitted = TextUtils.ellipsize(line, TextPaint(score), videoW * 0.92f, TextUtils.TruncateAt.END).toString()
-      drawCentered(c, "FINAL", videoW / 2f, videoH * 0.77f, sub)
-      drawCentered(c, fitted, videoW / 2f, videoH * 0.87f, score)
+      val cx = videoW / 2f
+      val cy = videoH * 0.87f
+      val result = "${state.homeGoals} - ${state.awayGoals}"
+      val gap = videoH * 0.04f
+      val resultHalf = score.measureText(result) / 2
+      val nameMax = cx - resultHalf - gap - videoW * 0.04f
+      val namePaintEnd = TextPaint(score)
+      val home = TextUtils.ellipsize(state.home.uppercase(), namePaintEnd, nameMax, TextUtils.TruncateAt.END).toString()
+      val away = TextUtils.ellipsize(state.away.uppercase(), namePaintEnd, nameMax, TextUtils.TruncateAt.END).toString()
+
+      drawCentered(c, "FINAL", cx, videoH * 0.77f, sub)
+      drawCentered(c, result, cx, cy, score)
+      drawCentered(c, home, cx - resultHalf - gap - score.measureText(home) / 2, cy, score)
+      drawCentered(c, away, cx + resultHalf + gap + score.measureText(away) / 2, cy, score)
     }
     return bmp
   }
