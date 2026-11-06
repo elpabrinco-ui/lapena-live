@@ -222,14 +222,14 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         updateLiveUi()
         startChat()
       } else if (endCardFilter != null) {
-        // Ya está mostrando la pantalla de cierre: cortar ya.
-        stopStreaming("Transmisión finalizada")
+        // Ya está mostrando la pantalla de cierre: terminar ya (también en YouTube).
+        finishEndCard()
       } else {
         AlertDialog.Builder(this)
           .setTitle("Terminar transmisión")
           .setItems(arrayOf(
-            "Cerrar con pantalla final ($END_CARD_SECONDS s)",
-            "Cortar ahora",
+            "Cerrar con pantalla final ($END_CARD_SECONDS s) y finalizar el vivo",
+            "Cortar ahora (el vivo queda abierto por si volvés)",
           )) { _, which ->
             if (which == 0) startEndCard() else stopStreaming("Transmisión detenida")
           }
@@ -377,8 +377,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     override fun run() {
       if (endCardFilter == null) return
       if (endCardRemaining <= 0) {
-        stopStreaming("Transmisión finalizada")
-        finishOnYouTube()
+        finishEndCard()
         return
       }
       tvStatus.text = "Pantalla final · se corta en $endCardRemaining s"
@@ -418,27 +417,64 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     updateLiveUi()
   }
 
-  /** Al terminar con la pantalla final: cierra el vivo en YouTube (como "Finalizar transmisión"). */
-  private fun finishOnYouTube() {
-    val sel = selection ?: return
+  private var finishing = false
+
+  /**
+   * Termina desde la pantalla final: primero finaliza el vivo en YouTube
+   * (así el video termina en la pantalla final) y después corta la señal.
+   */
+  private fun finishEndCard() {
+    if (finishing) return
+    finishing = true
+    handler.removeCallbacks(endCardTick)
+    val sel = selection
+    if (sel == null) {
+      // Clave manual: la app no puede cerrar el vivo; hay que hacerlo en YouTube Studio.
+      stopStreaming("Transmisión finalizada")
+      finishing = false
+      showInfo("Transmisión terminada",
+        "Como usaste una clave manual, finalizá el vivo en YouTube Studio. " +
+          "Si elegís el partido con 📅 PARTIDO, la app lo cierra sola.")
+      return
+    }
+    tvStatus.text = "Finalizando en YouTube…"
+    btnStartStop.isEnabled = false
     thread {
-      val token = YouTubeAuth.getTokenSilently(this)
-      val msg = if (token == null) {
-        "Finalizá el vivo en YouTube Studio (falta iniciar sesión)"
-      } else try {
-        YouTubeApi.complete(token, sel.broadcastId)
-        "Vivo finalizado en YouTube ✓"
+      val error: String? = try {
+        val token = YouTubeAuth.getTokenSilently(this)
+        if (token == null) {
+          "Falta volver a conectar la cuenta de YouTube."
+        } else {
+          YouTubeApi.complete(token, sel.broadcastId)
+          null
+        }
       } catch (e: YouTubeException) {
-        if (e.reason == "redundantTransition") "Vivo finalizado en YouTube ✓" else "No se pudo finalizar en YouTube: ${e.message}"
+        if (e.reason == "redundantTransition") null else e.message
       } catch (e: Exception) {
-        "No se pudo finalizar en YouTube: ${e.message}"
+        e.message ?: "Sin conexión"
       }
-      Selection.clear(this)
       runOnUiThread {
-        toast(msg)
-        loadSelection()
+        // Unos segundos más de pantalla final para que YouTube la guarde en el video.
+        handler.postDelayed({
+          stopStreaming(if (error == null) "Vivo finalizado en YouTube ✓" else "Transmisión detenida")
+          btnStartStop.isEnabled = true
+          finishing = false
+          if (error == null) {
+            Selection.clear(this)
+            loadSelection()
+            toast("Vivo finalizado en YouTube ✓")
+          } else {
+            showInfo("No se pudo finalizar en YouTube",
+              "$error\n\nEntrá a YouTube Studio y tocá \"Finalizar transmisión\".")
+          }
+        }, 3000)
       }
     }
+  }
+
+  private fun showInfo(title: String, message: String) {
+    AlertDialog.Builder(this).setTitle(title).setMessage(message)
+      .setPositiveButton("OK", null).show()
   }
 
   // ---------------- Chat ----------------
