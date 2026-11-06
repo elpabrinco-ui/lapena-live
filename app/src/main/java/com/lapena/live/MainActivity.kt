@@ -1,8 +1,12 @@
 package com.lapena.live
 
 import android.Manifest
+import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.KeyEvent
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.widget.Button
@@ -94,7 +98,35 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
       }
     })
 
+    // "PEGAR": toma la clave del portapapeles, sin usar el teclado.
+    findViewById<Button>(R.id.btnPaste).setOnClickListener {
+      val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+      val text = clipboard.primaryClip?.takeIf { it.itemCount > 0 }
+        ?.getItemAt(0)?.coerceToText(this)?.toString()?.trim().orEmpty()
+      if (text.isEmpty()) {
+        toast("No hay nada copiado. Copiá la clave en YouTube Studio primero.")
+      } else {
+        etKey.setText(text)
+        saveKey(text)
+        hideKeyboard()
+        toast("Clave guardada. Tocá EN VIVO ▶")
+      }
+    }
+
+    // Tecla "Listo" del teclado: guarda la clave y cierra el teclado.
+    etKey.setOnEditorActionListener { _, actionId, event ->
+      val isDone = actionId == EditorInfo.IME_ACTION_DONE ||
+        (event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN)
+      if (isDone) {
+        saveKey(etKey.text.toString().trim())
+        hideKeyboard()
+        toast("Clave guardada. Tocá EN VIVO ▶")
+      }
+      isDone
+    }
+
     btnStartStop.setOnClickListener {
+      hideKeyboard()
       if (!prepared) {
         requestPermissionsIfNeeded()
         return@setOnClickListener
@@ -105,7 +137,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
           toast("Pegá la clave de transmisión de YouTube")
           return@setOnClickListener
         }
-        prefs.edit().putString(KEY_STREAM, key).apply()
+        saveKey(key)
         stream.startStream(YOUTUBE_RTMP + key)
         btnStartStop.setText(R.string.stop)
         tvStatus.text = "Conectando…"
@@ -119,6 +151,16 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     }
 
     requestPermissionsIfNeeded()
+  }
+
+  private fun saveKey(key: String) {
+    if (key.isNotEmpty()) getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_STREAM, key).apply()
+  }
+
+  private fun hideKeyboard() {
+    val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+    imm.hideSoftInputFromWindow(etKey.windowToken, 0)
+    etKey.clearFocus()
   }
 
   private fun requestPermissionsIfNeeded() {

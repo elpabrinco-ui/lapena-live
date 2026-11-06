@@ -28,17 +28,24 @@
       android:layout_weight="1"
       android:hint="@string/hint_key"
       android:inputType="textPassword"
-      android:imeOptions="actionDone"
+      android:imeOptions="actionDone|flagNoExtractUi|flagNoFullscreen"
       android:singleLine="true"
       android:textColor="@android:color/white"
       android:textColorHint="#BBBBBB" />
+
+    <Button
+      android:id="@+id/btnPaste"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="8dp"
+      android:text="PEGAR" />
 
     <TextView
       android:id="@+id/tvStatus"
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"
       android:layout_marginStart="12dp"
-      android:text="Listo"
+      android:text="Sin transmitir"
       android:textColor="@android:color/white"
       android:textSize="14sp" />
   </LinearLayout>
