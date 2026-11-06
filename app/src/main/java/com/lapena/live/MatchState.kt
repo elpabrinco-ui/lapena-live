@@ -1,6 +1,10 @@
 package com.lapena.live
 
+import org.json.JSONArray
 import org.json.JSONObject
+
+/** Jugador de la formación. */
+data class Player(val number: String, val name: String)
 
 /**
  * Estado del marcador. El celular de control lo envía completo en cada cambio,
@@ -18,6 +22,10 @@ data class MatchState(
   val sentAt: Long = 0,             // hora (epoch ms) del envío
   val visible: Boolean = true,
   val chat: Boolean = true,         // mostrar comentarios de YouTube en el video
+  val welcome: Boolean = false,     // pantalla de bienvenida con la formación
+  val formation: String = "2-3-1",  // líneas de campo, de defensa a ataque
+  val starters: List<Player> = emptyList(), // [0] = arquero, después por líneas
+  val subs: List<Player> = emptyList(),
 ) {
   /** Tiempo del reloj ahora, usando la hora del celular (ambos celulares usan hora de red). */
   fun clockNow(now: Long = System.currentTimeMillis()): Long {
@@ -33,6 +41,10 @@ data class MatchState(
     put("run", running); put("el", elapsedMs); put("at", sentAt)
     put("vis", visible)
     put("chat", chat)
+    put("wel", welcome)
+    put("fm", formation)
+    put("st", playersToJson(starters))
+    put("sb", playersToJson(subs))
   }.toString()
 
   companion object {
@@ -50,9 +62,43 @@ data class MatchState(
         sentAt = o.optLong("at"),
         visible = o.optBoolean("vis", true),
         chat = o.optBoolean("chat", true),
+        welcome = o.optBoolean("wel", false),
+        formation = o.optString("fm", "2-3-1"),
+        starters = playersFromJson(o.optJSONArray("st")),
+        subs = playersFromJson(o.optJSONArray("sb")),
       )
     } catch (e: Exception) {
       null
+    }
+
+    private fun playersToJson(list: List<Player>) = JSONArray().apply {
+      list.forEach { put(JSONArray().put(it.number).put(it.name)) }
+    }
+
+    private fun playersFromJson(arr: JSONArray?): List<Player> {
+      if (arr == null) return emptyList()
+      return (0 until arr.length()).mapNotNull { i ->
+        val p = arr.optJSONArray(i) ?: return@mapNotNull null
+        Player(p.optString(0), p.optString(1))
+      }
+    }
+
+    /** "2-3-1" -> [2, 3, 1]. Si no suma [outfield], arma un esquema razonable. */
+    fun parseFormation(text: String, outfield: Int): List<Int> {
+      val lines = text.split("-").mapNotNull { it.trim().toIntOrNull() }.filter { it > 0 }
+      if (lines.isNotEmpty() && lines.sum() == outfield) return lines
+      return when (outfield) {
+        4 -> listOf(1, 2, 1)
+        6 -> listOf(2, 3, 1)
+        else -> listOf(outfield)
+      }
+    }
+
+    /** Nombre del puesto para cada línea (defensa → ataque). */
+    fun lineLabel(lineIndex: Int, lineCount: Int): String = when {
+      lineIndex == lineCount - 1 -> "Delantero"
+      lineIndex == 0 -> "Defensor"
+      else -> "Mediocampista"
     }
 
     fun formatClock(ms: Long): String {

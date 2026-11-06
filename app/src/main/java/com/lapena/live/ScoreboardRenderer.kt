@@ -197,6 +197,140 @@ class ScoreboardRenderer(context: Context) {
     return bmp
   }
 
+  // ---------------- Bienvenida ----------------
+
+  /**
+   * Pantalla de bienvenida (1280x720): a la izquierda escudo, partido y suplentes;
+   * a la derecha media cancha con los titulares en su posición (atacando hacia arriba).
+   */
+  fun renderWelcome(state: MatchState, videoW: Int, videoH: Int): Bitmap {
+    val bmp = Bitmap.createBitmap(videoW, videoH, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    c.drawColor(MAROON)
+    val W = videoW.toFloat()
+    val H = videoH.toFloat()
+
+    // ----- Columna izquierda -----
+    val leftCx = W * 0.25f
+    val crestSize = H * 0.30f
+    crest?.let {
+      c.drawBitmap(it, null,
+        RectF(leftCx - crestSize / 2, H * 0.05f, leftCx + crestSize / 2, H * 0.05f + crestSize), crestPaint)
+    }
+    val big = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.WHITE
+      typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+      textAlign = Paint.Align.CENTER
+      textSize = H * 0.055f
+    }
+    val small = TextPaint(big).apply {
+      color = Color.parseColor("#FFC9C9")
+      typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+      textSize = H * 0.033f
+    }
+    val colW = W * 0.44f
+    fun fit(text: String, p: TextPaint) =
+      TextUtils.ellipsize(text, p, colW, TextUtils.TruncateAt.END).toString()
+
+    drawCentered(c, fit(state.home.uppercase(), big), leftCx, H * 0.43f, big)
+    drawCentered(c, "vs", leftCx, H * 0.50f, small)
+    drawCentered(c, fit(state.away.uppercase(), big), leftCx, H * 0.57f, big)
+    val pill = TextPaint(small).apply {
+      color = Color.WHITE
+      typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+    }
+    val pillText = "EN INSTANTES COMIENZA EL PARTIDO"
+    val pillW = pill.measureText(pillText) + H * 0.05f
+    fill.color = Color.parseColor("#55000000")
+    c.drawRoundRect(RectF(leftCx - pillW / 2, H * 0.625f, leftCx + pillW / 2, H * 0.695f), H * 0.035f, H * 0.035f, fill)
+    drawCentered(c, pillText, leftCx, H * 0.66f, pill)
+
+    // Suplentes
+    if (state.subs.isNotEmpty()) {
+      drawCentered(c, "SUPLENTES", leftCx, H * 0.77f, small)
+      val subsPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = H * 0.032f
+        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+      }
+      val text = state.subs.joinToString("  ·  ") { listOf(it.number, it.name).filter { s -> s.isNotEmpty() }.joinToString(" ") }
+      val layout = android.text.StaticLayout.Builder.obtain(text, 0, text.length, subsPaint, colW.toInt())
+        .setAlignment(android.text.Layout.Alignment.ALIGN_CENTER)
+        .setMaxLines(3)
+        .setEllipsize(TextUtils.TruncateAt.END)
+        .build()
+      c.save()
+      c.translate(leftCx - colW / 2, H * 0.80f)
+      layout.draw(c)
+      c.restore()
+    }
+
+    // ----- Cancha (derecha) -----
+    val pitch = RectF(W * 0.52f, H * 0.06f, W * 0.96f, H * 0.94f)
+    val stripes = 8
+    val stripeH = pitch.height() / stripes
+    for (i in 0 until stripes) {
+      fill.color = Color.parseColor(if (i % 2 == 0) "#2E7D32" else "#33873A")
+      c.drawRect(pitch.left, pitch.top + i * stripeH, pitch.right, pitch.top + (i + 1) * stripeH, fill)
+    }
+    val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.parseColor("#DDFFFFFF")
+      style = Paint.Style.STROKE
+      strokeWidth = H * 0.005f
+    }
+    c.drawRect(pitch, line)
+    // Mitad de cancha arriba (círculo central cortado) y arco propio abajo
+    c.drawArc(RectF(pitch.centerX() - pitch.width() * 0.16f, pitch.top - pitch.width() * 0.16f,
+      pitch.centerX() + pitch.width() * 0.16f, pitch.top + pitch.width() * 0.16f), 0f, 180f, false, line)
+    val areaW = pitch.width() * 0.55f
+    val areaH = pitch.height() * 0.20f
+    c.drawRect(pitch.centerX() - areaW / 2, pitch.bottom - areaH, pitch.centerX() + areaW / 2, pitch.bottom, line)
+    val goalW = pitch.width() * 0.22f
+    c.drawRect(pitch.centerX() - goalW / 2, pitch.bottom - H * 0.015f, pitch.centerX() + goalW / 2, pitch.bottom + H * 0.015f, line)
+
+    // Posiciones: arquero abajo; líneas repartidas hacia arriba
+    val outfield = (state.starters.size - 1).coerceAtLeast(0)
+    val lines = MatchState.parseFormation(state.formation, outfield)
+    val spots = ArrayList<Pair<Float, Float>>()
+    spots.add(pitch.centerX() to pitch.bottom - pitch.height() * 0.10f)
+    val topY = pitch.top + pitch.height() * 0.16f
+    val bottomY = pitch.bottom - pitch.height() * 0.34f
+    lines.forEachIndexed { li, count ->
+      val y = if (lines.size == 1) (topY + bottomY) / 2
+        else bottomY - (bottomY - topY) * li / (lines.size - 1)
+      for (k in 0 until count) {
+        val x = pitch.left + pitch.width() * (k + 1) / (count + 1)
+        spots.add(x to y)
+      }
+    }
+
+    val r = H * 0.038f
+    val numPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.WHITE
+      typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+      textAlign = Paint.Align.CENTER
+      textSize = r * 1.0f
+    }
+    val namePaintP = TextPaint(numPaint).apply { textSize = H * 0.028f }
+    val nameBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#AA000000") }
+    val maxNameW = pitch.width() / 3.4f
+    state.starters.forEachIndexed { i, p ->
+      val (x, y) = spots.getOrNull(i) ?: return@forEachIndexed
+      fill.color = if (i == 0) Color.parseColor("#141414") else MAROON
+      c.drawCircle(x, y, r, fill)
+      c.drawCircle(x, y, r, Paint(line).apply { color = Color.WHITE })
+      if (p.number.isNotEmpty()) drawCentered(c, p.number, x, y, numPaint)
+      if (p.name.isNotEmpty()) {
+        val n = TextUtils.ellipsize(p.name, namePaintP, maxNameW, TextUtils.TruncateAt.END).toString()
+        val tw = namePaintP.measureText(n) + H * 0.02f
+        val ny = y + r + H * 0.032f
+        c.drawRoundRect(RectF(x - tw / 2, ny - H * 0.024f, x + tw / 2, ny + H * 0.024f), H * 0.012f, H * 0.012f, nameBg)
+        drawCentered(c, n, x, ny, namePaintP)
+      }
+    }
+    return bmp
+  }
+
   // ---------------- Chat ----------------
 
   private val chatAuthorPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {

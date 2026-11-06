@@ -1,6 +1,8 @@
 package com.lapena.live
 
 import android.content.Context
+import android.content.Intent
+import android.widget.Toast
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -41,6 +43,7 @@ class ControlActivity : AppCompatActivity() {
   private lateinit var btnP1: Button
   private lateinit var btnP2: Button
   private lateinit var cbVisible: CheckBox
+  private lateinit var btnWelcome: Button
 
   private val tick = object : Runnable {
     override fun run() {
@@ -124,6 +127,19 @@ class ControlActivity : AppCompatActivity() {
     btnFutsal.setOnClickListener { change { copy(periodMinutes = 20) } }
     cbVisible.setOnCheckedChangeListener { _, checked -> change { copy(visible = checked) } }
 
+    btnWelcome = findViewById(R.id.btnWelcome)
+    btnWelcome.setOnClickListener {
+      if (!state.welcome && state.starters.all { it.name.isEmpty() }) {
+        Toast.makeText(this, "Primero cargá la formación", Toast.LENGTH_LONG).show()
+        startActivity(Intent(this, LineupActivity::class.java))
+      } else {
+        change { copy(welcome = !welcome) }
+      }
+    }
+    findViewById<Button>(R.id.btnLineup).setOnClickListener {
+      startActivity(Intent(this, LineupActivity::class.java))
+    }
+
     findViewById<Button>(R.id.btnNewMatch).setOnClickListener {
       confirm("¿Empezar un partido nuevo? Goles y reloj vuelven a cero.") {
         change { copy(homeGoals = 0, awayGoals = 0, period = 1, running = false, elapsedMs = 0) }
@@ -135,6 +151,16 @@ class ControlActivity : AppCompatActivity() {
 
   override fun onResume() {
     super.onResume()
+    // Si se editó la formación, tomarla y enviarla.
+    val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    if (prefs.getBoolean("lineup_dirty", false)) {
+      prefs.edit().putBoolean("lineup_dirty", false).apply()
+      prefs.getString(KEY_STATE, null)?.let { MatchState.fromJson(it) }?.let { saved ->
+        state = state.copy(formation = saved.formation, starters = saved.starters, subs = saved.subs)
+        refreshViews()
+        send()
+      }
+    }
     handler.post(tick)
   }
 
@@ -192,6 +218,9 @@ class ControlActivity : AppCompatActivity() {
     highlight(btnFutsal, state.periodMinutes == 20)
     highlight(btnP1, state.period == 1)
     highlight(btnP2, state.period == 2)
+    if (::btnWelcome.isInitialized) {
+      btnWelcome.text = if (state.welcome) "OCULTAR BIENVENIDA" else "MOSTRAR BIENVENIDA"
+    }
     updateClockView()
   }
 

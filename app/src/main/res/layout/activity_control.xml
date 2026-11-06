@@ -42,6 +42,31 @@
         android:textColor="#BBBBBB" />
     </LinearLayout>
 
+    <!-- Bienvenida / formación -->
+    <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="8dp"
+      android:orientation="horizontal">
+
+      <Button
+        android:id="@+id/btnWelcome"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:layout_weight="1"
+        android:backgroundTint="#7A1F2B"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
+        android:text="MOSTRAR BIENVENIDA" />
+
+      <Button
+        android:id="@+id/btnLineup"
+        android:layout_width="wrap_content"
+        android:layout_height="56dp"
+        android:layout_marginStart="8dp"
+        android:text="FORMACIÓN" />
+    </LinearLayout>
+
     <!-- Modalidad -->
     <LinearLayout
       android:layout_width="match_parent"

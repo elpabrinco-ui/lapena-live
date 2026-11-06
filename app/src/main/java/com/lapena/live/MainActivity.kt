@@ -85,6 +85,8 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   private lateinit var tvMatch: TextView
   private lateinit var btnMatch: Button
   private var chatFilter: ImageObjectFilterRender? = null
+  private var welcomeFilter: ImageObjectFilterRender? = null
+  private var lastWelcomeKey = ""
   private var chatPoller: ChatPoller? = null
   private data class ChatItem(val msg: YouTubeApi.ChatMessage, val at: Long, val n: Long)
   private val chatItems = ArrayList<ChatItem>()
@@ -105,6 +107,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     override fun run() {
       redrawBoard(force = false)
       redrawChat(force = false)
+      redrawWelcome(force = false)
       handler.postDelayed(this, 250)
     }
   }
@@ -315,8 +318,10 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     gl.clearFilters()
     val board = ImageObjectFilterRender().also { boardFilter = it }
     val chat = ImageObjectFilterRender().also { it.alpha = 0f; chatFilter = it }
+    val welcome = ImageObjectFilterRender().also { it.alpha = 0f; welcomeFilter = it }
     gl.addFilter(board)
     gl.addFilter(chat)
+    gl.addFilter(welcome)
     endCardBitmap?.let { bmp ->
       val card = newEndCardFilter(bmp)
       endCardFilter = card
@@ -324,6 +329,27 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     }
     redrawBoard(force = true)
     redrawChat(force = true)
+    redrawWelcome(force = true)
+  }
+
+  /** Pantalla de bienvenida con la formación: se muestra/oculta desde el celular de control. */
+  private fun redrawWelcome(force: Boolean) {
+    val filter = welcomeFilter ?: return
+    val state = matchState
+    if (state == null || !state.welcome || state.starters.isEmpty()) {
+      if (force || lastWelcomeKey != "off") {
+        filter.alpha = 0f
+        lastWelcomeKey = "off"
+      }
+      return
+    }
+    val key = listOf(state.home, state.away, state.formation, state.starters, state.subs).toString()
+    if (!force && key == lastWelcomeKey) return
+    lastWelcomeKey = key
+    filter.setImage(renderer.renderWelcome(state, WIDTH, HEIGHT))
+    filter.setScale(100f, 100f)
+    filter.setPosition(0f, 0f)
+    filter.alpha = 1f
   }
 
   private fun redrawBoard(force: Boolean) {
