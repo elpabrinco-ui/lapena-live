@@ -319,9 +319,10 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     val board = ImageObjectFilterRender().also { boardFilter = it }
     val chat = ImageObjectFilterRender().also { it.alpha = 0f; chatFilter = it }
     val welcome = ImageObjectFilterRender().also { it.alpha = 0f; welcomeFilter = it }
+    // El chat va encima de la bienvenida para que se vea también en la previa.
     gl.addFilter(board)
-    gl.addFilter(chat)
     gl.addFilter(welcome)
+    gl.addFilter(chat)
     endCardBitmap?.let { bmp ->
       val card = newEndCardFilter(bmp)
       endCardFilter = card
@@ -343,10 +344,11 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
       }
       return
     }
-    val key = listOf(state.home, state.away, state.formation, state.starters, state.subs).toString()
+    val compact = welcomeWithChat()
+    val key = listOf(state.home, state.away, state.formation, state.starters, state.subs, compact).toString()
     if (!force && key == lastWelcomeKey) return
     lastWelcomeKey = key
-    filter.setImage(renderer.renderWelcome(state, WIDTH, HEIGHT))
+    filter.setImage(renderer.renderWelcome(state, WIDTH, HEIGHT, compact))
     filter.setScale(100f, 100f)
     filter.setPosition(0f, 0f)
     filter.alpha = 1f
@@ -568,13 +570,17 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     redrawChat(force = false)
   }
 
+  /** Si hay chat activo, la bienvenida deja lugar abajo a la izquierda. */
+  private fun welcomeWithChat(): Boolean =
+    chatPoller != null && (matchState?.chat ?: true)
+
   private fun redrawChat(force: Boolean) {
     val filter = chatFilter ?: return
     val now = System.currentTimeMillis()
     val enabled = matchState?.chat ?: true
     val visible = if (!enabled) emptyList() else chatItems
       .filter { it.at <= now && now - it.at < CHAT_SHOW_MS }
-      .takeLast(CHAT_MAX_VISIBLE)
+      .takeLast(if (matchState?.welcome == true) 2 else CHAT_MAX_VISIBLE)
     val key = visible.joinToString(",") { it.n.toString() }
     if (!force && key == lastChatKey) return
     lastChatKey = key

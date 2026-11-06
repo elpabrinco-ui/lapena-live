@@ -203,7 +203,7 @@ class ScoreboardRenderer(context: Context) {
    * Pantalla de bienvenida (1280x720): a la izquierda escudo, partido y suplentes;
    * a la derecha media cancha con los titulares en su posición (atacando hacia arriba).
    */
-  fun renderWelcome(state: MatchState, videoW: Int, videoH: Int): Bitmap {
+  fun renderWelcome(state: MatchState, videoW: Int, videoH: Int, compact: Boolean = false): Bitmap {
     val bmp = Bitmap.createBitmap(videoW, videoH, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp)
     c.drawColor(MAROON)
@@ -211,11 +211,14 @@ class ScoreboardRenderer(context: Context) {
     val H = videoH.toFloat()
 
     // ----- Columna izquierda -----
+    // compact = deja libre la parte de abajo a la izquierda para el chat
+    fun y(normal: Float, small: Float) = H * (if (compact) small else normal)
     val leftCx = W * 0.25f
-    val crestSize = H * 0.30f
+    val crestSize = y(0.30f, 0.19f)
+    val crestTop = y(0.05f, 0.04f)
     crest?.let {
       c.drawBitmap(it, null,
-        RectF(leftCx - crestSize / 2, H * 0.05f, leftCx + crestSize / 2, H * 0.05f + crestSize), crestPaint)
+        RectF(leftCx - crestSize / 2, crestTop, leftCx + crestSize / 2, crestTop + crestSize), crestPaint)
     }
     val big = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
       color = Color.WHITE
@@ -232,9 +235,9 @@ class ScoreboardRenderer(context: Context) {
     fun fit(text: String, p: TextPaint) =
       TextUtils.ellipsize(text, p, colW, TextUtils.TruncateAt.END).toString()
 
-    drawCentered(c, fit(state.home.uppercase(), big), leftCx, H * 0.43f, big)
-    drawCentered(c, "vs", leftCx, H * 0.50f, small)
-    drawCentered(c, fit(state.away.uppercase(), big), leftCx, H * 0.57f, big)
+    drawCentered(c, fit(state.home.uppercase(), big), leftCx, y(0.43f, 0.29f), big)
+    drawCentered(c, "vs", leftCx, y(0.50f, 0.345f), small)
+    drawCentered(c, fit(state.away.uppercase(), big), leftCx, y(0.57f, 0.40f), big)
     val pill = TextPaint(small).apply {
       color = Color.WHITE
       typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
@@ -242,12 +245,13 @@ class ScoreboardRenderer(context: Context) {
     val pillText = "EN INSTANTES COMIENZA EL PARTIDO"
     val pillW = pill.measureText(pillText) + H * 0.05f
     fill.color = Color.parseColor("#55000000")
-    c.drawRoundRect(RectF(leftCx - pillW / 2, H * 0.625f, leftCx + pillW / 2, H * 0.695f), H * 0.035f, H * 0.035f, fill)
-    drawCentered(c, pillText, leftCx, H * 0.66f, pill)
+    val pillCy = y(0.66f, 0.47f)
+    c.drawRoundRect(RectF(leftCx - pillW / 2, pillCy - H * 0.035f, leftCx + pillW / 2, pillCy + H * 0.035f), H * 0.035f, H * 0.035f, fill)
+    drawCentered(c, pillText, leftCx, pillCy, pill)
 
     // Suplentes
     if (state.subs.isNotEmpty()) {
-      drawCentered(c, "SUPLENTES", leftCx, H * 0.77f, small)
+      drawCentered(c, "SUPLENTES", leftCx, y(0.77f, 0.56f), small)
       val subsPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textSize = H * 0.032f
@@ -256,25 +260,22 @@ class ScoreboardRenderer(context: Context) {
       val text = state.subs.joinToString("  ·  ") { listOf(it.number, it.name).filter { s -> s.isNotEmpty() }.joinToString(" ") }
       val layout = android.text.StaticLayout.Builder.obtain(text, 0, text.length, subsPaint, colW.toInt())
         .setAlignment(android.text.Layout.Alignment.ALIGN_CENTER)
-        .setMaxLines(3)
+        .setMaxLines(if (compact) 2 else 3)
         .setEllipsize(TextUtils.TruncateAt.END)
         .build()
       c.save()
-      c.translate(leftCx - colW / 2, H * 0.80f)
+      c.translate(leftCx - colW / 2, y(0.80f, 0.585f))
       layout.draw(c)
       c.restore()
     }
 
     // ----- Cancha (derecha) -----
     val pitch = RectF(W * 0.52f, H * 0.06f, W * 0.96f, H * 0.94f)
-    val stripes = 8
-    val stripeH = pitch.height() / stripes
-    for (i in 0 until stripes) {
-      fill.color = Color.parseColor(if (i % 2 == 0) "#2E7D32" else "#33873A")
-      c.drawRect(pitch.left, pitch.top + i * stripeH, pitch.right, pitch.top + (i + 1) * stripeH, fill)
-    }
+    val outfieldCount = (state.starters.size - 1).coerceAtLeast(0)
+    val futsal = outfieldCount == 4
+    if (futsal) drawParquet(c, pitch, H) else drawGrass(c, pitch)
     val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      color = Color.parseColor("#DDFFFFFF")
+      color = Color.parseColor("#EEFFFFFF")
       style = Paint.Style.STROKE
       strokeWidth = H * 0.005f
     }
@@ -282,9 +283,20 @@ class ScoreboardRenderer(context: Context) {
     // Mitad de cancha arriba (círculo central cortado) y arco propio abajo
     c.drawArc(RectF(pitch.centerX() - pitch.width() * 0.16f, pitch.top - pitch.width() * 0.16f,
       pitch.centerX() + pitch.width() * 0.16f, pitch.top + pitch.width() * 0.16f), 0f, 180f, false, line)
-    val areaW = pitch.width() * 0.55f
-    val areaH = pitch.height() * 0.20f
-    c.drawRect(pitch.centerX() - areaW / 2, pitch.bottom - areaH, pitch.centerX() + areaW / 2, pitch.bottom, line)
+    if (futsal) {
+      // Área de futsal: forma de "D" (dos cuartos de círculo unidos por una recta)
+      val rad = pitch.height() * 0.20f
+      val half = pitch.width() * 0.06f
+      val cx = pitch.centerX()
+      val b = pitch.bottom
+      c.drawArc(RectF(cx - half - rad, b - rad, cx - half + rad, b + rad), 180f, 90f, false, line)
+      c.drawArc(RectF(cx + half - rad, b - rad, cx + half + rad, b + rad), 270f, 90f, false, line)
+      c.drawLine(cx - half, b - rad, cx + half, b - rad, line)
+    } else {
+      val areaW = pitch.width() * 0.55f
+      val areaH = pitch.height() * 0.20f
+      c.drawRect(pitch.centerX() - areaW / 2, pitch.bottom - areaH, pitch.centerX() + areaW / 2, pitch.bottom, line)
+    }
     val goalW = pitch.width() * 0.22f
     c.drawRect(pitch.centerX() - goalW / 2, pitch.bottom - H * 0.015f, pitch.centerX() + goalW / 2, pitch.bottom + H * 0.015f, line)
 
@@ -292,9 +304,9 @@ class ScoreboardRenderer(context: Context) {
     val outfield = (state.starters.size - 1).coerceAtLeast(0)
     val lines = MatchState.parseFormation(state.formation, outfield)
     val spots = ArrayList<Pair<Float, Float>>()
-    spots.add(pitch.centerX() to pitch.bottom - pitch.height() * 0.10f)
+    spots.add(pitch.centerX() to pitch.bottom - pitch.height() * 0.15f)
     val topY = pitch.top + pitch.height() * 0.16f
-    val bottomY = pitch.bottom - pitch.height() * 0.34f
+    val bottomY = pitch.bottom - pitch.height() * 0.37f
     lines.forEachIndexed { li, count ->
       val y = if (lines.size == 1) (topY + bottomY) / 2
         else bottomY - (bottomY - topY) * li / (lines.size - 1)
@@ -329,6 +341,52 @@ class ScoreboardRenderer(context: Context) {
       }
     }
     return bmp
+  }
+
+  private fun drawGrass(c: Canvas, pitch: RectF) {
+    val stripes = 8
+    val stripeH = pitch.height() / stripes
+    for (i in 0 until stripes) {
+      fill.color = Color.parseColor(if (i % 2 == 0) "#2E7D32" else "#33873A")
+      c.drawRect(pitch.left, pitch.top + i * stripeH, pitch.right, pitch.top + (i + 1) * stripeH, fill)
+    }
+  }
+
+  /** Piso de parquet: tablas verticales con tonos y uniones escalonadas. */
+  private fun drawParquet(c: Canvas, pitch: RectF, H: Float) {
+    val tones = intArrayOf(
+      Color.parseColor("#C8925A"), Color.parseColor("#BD8650"),
+      Color.parseColor("#D09C64"), Color.parseColor("#B98049"),
+    )
+    val seam = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.parseColor("#33000000")
+      strokeWidth = H * 0.002f
+    }
+    val plankW = pitch.width() / 14f
+    val plankL = pitch.height() / 4.5f
+    c.save()
+    c.clipRect(pitch)
+    var col = 0
+    var x = pitch.left
+    while (x < pitch.right) {
+      // cada columna empieza desplazada para que las uniones no queden alineadas
+      var yy = pitch.top - plankL * ((col * 0.37f) % 1f)
+      var k = col
+      while (yy < pitch.bottom) {
+        fill.color = tones[(k * 7 + col * 3) % tones.size]
+        c.drawRect(x, yy, x + plankW, yy + plankL, fill)
+        c.drawLine(x, yy, x + plankW, yy, seam)
+        yy += plankL
+        k++
+      }
+      c.drawLine(x, pitch.top, x, pitch.bottom, seam)
+      x += plankW
+      col++
+    }
+    // brillo suave para que parezca barnizado
+    fill.color = Color.parseColor("#14FFFFFF")
+    c.drawRect(pitch.left, pitch.top, pitch.right, pitch.top + pitch.height() * 0.45f, fill)
+    c.restore()
   }
 
   // ---------------- Chat ----------------

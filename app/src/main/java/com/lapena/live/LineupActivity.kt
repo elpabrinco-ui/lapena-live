@@ -18,6 +18,7 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 
 /**
@@ -39,6 +40,7 @@ class LineupActivity : AppCompatActivity() {
   private val numberFields = ArrayList<EditText>()
   private val nameFields = ArrayList<EditText>()
 
+  private var roster: List<Player> = emptyList()
   private lateinit var spinner: Spinner
   private lateinit var rows: LinearLayout
   private lateinit var etSubs: EditText
@@ -60,6 +62,12 @@ class LineupActivity : AppCompatActivity() {
 
     root.addView(label("Formación de La Peña", 22f, bold = true))
 
+    roster = loadRoster()
+    root.addView(Button(this).apply {
+      text = "EDITAR PLANTEL (${roster.size})"
+      setOnClickListener { editRoster(this) }
+    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
     // Modalidad
     val rg = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
     val rbF7 = radio("F7 (7 jugadores)")
@@ -77,6 +85,10 @@ class LineupActivity : AppCompatActivity() {
     root.addView(rows)
 
     root.addView(label("Suplentes (uno por línea, ej: 10 Juan)", 14f).apply { setPadding(0, dp(16), 0, 0) })
+    root.addView(Button(this).apply {
+      text = "ELEGIR SUPLENTES DEL PLANTEL"
+      setOnClickListener { pickSubs() }
+    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     etSubs = EditText(this).apply {
       inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_WORDS
       minLines = 3
@@ -136,7 +148,7 @@ class LineupActivity : AppCompatActivity() {
         gravity = Gravity.CENTER_VERTICAL
         setPadding(0, dp(6), 0, 0)
       }
-      val tag = label("", 13f).apply { minWidth = dp(110) }
+      val tag = label("", 12f).apply { minWidth = dp(96) }
       val num = EditText(this).apply {
         inputType = InputType.TYPE_CLASS_NUMBER
         hint = "N°"
@@ -151,9 +163,14 @@ class LineupActivity : AppCompatActivity() {
         isSingleLine = true
         setText(keep.getOrNull(i)?.name.orEmpty())
       }
+      val pick = Button(this).apply {
+        text = "▼"
+        setOnClickListener { pickPlayer(num, name) }
+      }
       row.addView(tag)
-      row.addView(num, LinearLayout.LayoutParams(dp(64), ViewGroup.LayoutParams.WRAP_CONTENT))
+      row.addView(num, LinearLayout.LayoutParams(dp(56), ViewGroup.LayoutParams.WRAP_CONTENT))
       row.addView(name, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+      row.addView(pick, LinearLayout.LayoutParams(dp(48), ViewGroup.LayoutParams.WRAP_CONTENT))
       rows.addView(row)
       numberFields.add(num); nameFields.add(name)
     }
@@ -172,6 +189,90 @@ class LineupActivity : AppCompatActivity() {
       val tag = (rows.getChildAt(i) as LinearLayout).getChildAt(0) as TextView
       tag.text = labels.getOrElse(i) { "" }
     }
+  }
+
+  // ---------------- Plantel ----------------
+
+  private fun fmt(p: Player) = listOf(p.number, p.name).filter { it.isNotEmpty() }.joinToString(" ")
+
+  private fun parsePlayer(line: String): Player {
+    val parts = line.trim().split(Regex("\\s+"), limit = 2)
+    return if (parts.size == 2 && parts[0].all { it.isDigit() }) Player(parts[0], parts[1]) else Player("", line.trim())
+  }
+
+  /** Plantel guardado; la primera vez se arma con los jugadores ya cargados. */
+  private fun loadRoster(): List<Player> {
+    val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val saved = prefs.getString("roster", null)
+    if (saved != null) return saved.lines().filter { it.isNotBlank() }.map(::parsePlayer)
+    val seeded = (state.starters + state.subs).filter { it.name.isNotEmpty() }.distinctBy { it.name.lowercase() }
+    if (seeded.isNotEmpty()) saveRoster(seeded)
+    return seeded
+  }
+
+  private fun saveRoster(list: List<Player>) {
+    getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+      .putString("roster", list.joinToString("\n") { fmt(it) }).apply()
+  }
+
+  private fun sortedRoster() = roster.sortedWith(compareBy({ it.number.toIntOrNull() ?: 999 }, { it.name }))
+
+  private fun editRoster(button: Button) {
+    val et = EditText(this).apply {
+      inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_WORDS
+      minLines = 8
+      gravity = Gravity.TOP
+      setText(sortedRoster().joinToString("\n") { fmt(it) })
+    }
+    AlertDialog.Builder(this)
+      .setTitle("Plantel (uno por línea: número y nombre)")
+      .setView(et)
+      .setPositiveButton("Guardar") { _, _ ->
+        roster = et.text.toString().lines().filter { it.isNotBlank() }.map(::parsePlayer)
+        saveRoster(roster)
+        button.text = "EDITAR PLANTEL (${roster.size})"
+      }
+      .setNegativeButton("Cancelar", null)
+      .show()
+  }
+
+  /** Elegir un jugador del plantel para una fila de titular. */
+  private fun pickPlayer(num: EditText, name: EditText) {
+    val list = sortedRoster()
+    if (list.isEmpty()) {
+      Toast.makeText(this, "Cargá el plantel con EDITAR PLANTEL", Toast.LENGTH_LONG).show()
+      return
+    }
+    AlertDialog.Builder(this)
+      .setItems(list.map { fmt(it) }.toTypedArray()) { _, i ->
+        num.setText(list[i].number)
+        name.setText(list[i].name)
+      }
+      .show()
+  }
+
+  /** Marcar suplentes del plantel; los escritos a mano que no están en el plantel se conservan. */
+  private fun pickSubs() {
+    val starters = currentStarters().map { it.name.lowercase() }.toSet()
+    val options = sortedRoster().filter { it.name.lowercase() !in starters }
+    if (options.isEmpty()) {
+      Toast.makeText(this, "No hay jugadores del plantel disponibles", Toast.LENGTH_LONG).show()
+      return
+    }
+    val currentLines = etSubs.text.toString().lines().map { it.trim() }.filter { it.isNotEmpty() }
+    val currentNames = currentLines.map { parsePlayer(it).name.lowercase() }.toSet()
+    val checked = options.map { it.name.lowercase() in currentNames }.toBooleanArray()
+    AlertDialog.Builder(this)
+      .setTitle("Suplentes")
+      .setMultiChoiceItems(options.map { fmt(it) }.toTypedArray(), checked) { _, i, isChecked -> checked[i] = isChecked }
+      .setPositiveButton("Listo") { _, _ ->
+        val rosterNames = roster.map { it.name.lowercase() }.toSet()
+        val extras = currentLines.filter { parsePlayer(it).name.lowercase() !in rosterNames }
+        val chosen = options.filterIndexed { i, _ -> checked[i] }.map { fmt(it) }
+        etSubs.setText((chosen + extras).joinToString("\n"))
+      }
+      .setNegativeButton("Cancelar", null)
+      .show()
   }
 
   private fun currentStarters(): List<Player> = numberFields.indices.map {
