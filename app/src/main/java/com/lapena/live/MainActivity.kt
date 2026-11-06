@@ -16,6 +16,9 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -45,11 +48,11 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     private const val PREFS = "lapena_live"
     private const val KEY_STREAM = "stream_key"
 
-    // 720p 30fps: buen equilibrio entre calidad y datos móviles.
+    // Medidas de referencia para ubicar los gráficos (en % del video, sirven para cualquier calidad).
     private const val WIDTH = 1280
     private const val HEIGHT = 720
     private const val FPS = 30
-    private const val VIDEO_BITRATE = 2500 * 1000
+    private const val KEY_QUALITY = "quality"
     private const val AUDIO_BITRATE = 128 * 1000
     private const val SAMPLE_RATE = 44100
 
@@ -64,6 +67,16 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     private const val CHAT_SHOW_MS = 20_000L
     private const val CHAT_MAX_VISIBLE = 3
   }
+
+  /** Calidades disponibles: resolución y bitrate máximo. */
+  private data class Quality(val label: String, val w: Int, val h: Int, val bitrate: Int)
+  private val qualities = listOf(
+    Quality("480p", 854, 480, 1200 * 1000),
+    Quality("720p", 1280, 720, 2500 * 1000),
+    Quality("1080p", 1920, 1080, 5000 * 1000),
+  )
+  private var quality = qualities[1]
+  private lateinit var btnQuality: Button
 
   private lateinit var stream: RtmpStream
   private lateinit var surfaceView: SurfaceView
@@ -113,9 +126,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   }
 
   // Baja la calidad sola si la conexión se pone lenta, para que no se corte.
-  private val bitrateAdapter = QueueAwareBitrateAdapter(maxBitrate = VIDEO_BITRATE + AUDIO_BITRATE) {
-    stream.setVideoBitrateOnFly(it - AUDIO_BITRATE)
-  }
+  private var bitrateAdapter: QueueAwareBitrateAdapter? = null
 
   private val permissionLauncher =
     registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
@@ -153,6 +164,10 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     }
 
     renderer = ScoreboardRenderer(this)
+    btnQuality = findViewById(R.id.btnQuality)
+    val savedQuality = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_QUALITY, "720p")
+    setQuality(qualities.firstOrNull { it.label == savedQuality } ?: qualities[1], save = false)
+    btnQuality.setOnClickListener { chooseQuality() }
     matchCode = ScoreSync.savedCode(this, createIfMissing = true)
     updateCodeLabel()
 
@@ -213,17 +228,16 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         return@setOnClickListener
       }
       if (!stream.isStreaming) {
-        val key = etKey.text.toString().trim()
-        if (key.isEmpty()) {
-          toast("Pegá la clave de transmisión de YouTube")
+        if (selection == null) {
+          offerQuickLive()
           return@setOnClickListener
         }
-        saveKey(key)
-        stream.startStream(YOUTUBE_RTMP + key)
-        btnStartStop.setText(R.string.stop)
-        tvStatus.text = "Conectando…"
-        updateLiveUi()
-        startChat()
+        val key = etKey.text.toString().trim()
+        if (key.isEmpty()) {
+          toast("Elegí el partido de nuevo con 📅 PARTIDO")
+          return@setOnClickListener
+        }
+        goLive(key)
       } else if (endCardFilter != null) {
         // Ya está mostrando la pantalla de cierre: terminar ya (también en YouTube).
         finishEndCard()
@@ -348,7 +362,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     val key = listOf(state.home, state.away, state.formation, state.starters, state.subs, compact).toString()
     if (!force && key == lastWelcomeKey) return
     lastWelcomeKey = key
-    filter.setImage(renderer.renderWelcome(state, WIDTH, HEIGHT, compact))
+    filter.setImage(renderer.renderWelcome(state, quality.w, quality.h, compact))
     filter.setScale(100f, 100f)
     filter.setPosition(0f, 0f)
     filter.alpha = 1f
@@ -385,7 +399,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
 
   private fun startEndCard() {
     exitSaver()
-    val bmp = renderer.renderEndCard(matchState, WIDTH, HEIGHT)
+    val bmp = renderer.renderEndCard(matchState, quality.w, quality.h)
     endCardBitmap = bmp
     val filter = newEndCardFilter(bmp)
     endCardFilter = filter
@@ -429,7 +443,149 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     etKey.visibility = if (live) View.GONE else View.VISIBLE
     btnPaste.visibility = if (live) View.GONE else View.VISIBLE
     btnMatch.visibility = if (live) View.GONE else View.VISIBLE
+    btnQuality.visibility = if (live) View.GONE else View.VISIBLE
     tvMatch.visibility = if (live || selection == null) View.GONE else View.VISIBLE
+  }
+
+  // ---------------- Calidad ----------------
+
+  private fun setQuality(q: Quality, save: Boolean) {
+    quality = q
+    if (::btnQuality.isInitialized) btnQuality.text = q.label
+    if (save) getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_QUALITY, q.label).apply()
+  }
+
+  private fun chooseQuality() {
+    if (stream.isStreaming) {
+      toast("La calidad se cambia antes de salir en vivo")
+      return
+    }
+    val labels = arrayOf(
+      "480p · ~0,5 GB por hora · para señal floja",
+      "720p · ~1,1 GB por hora · recomendado",
+      "1080p · ~2,3 GB por hora · necesita buena señal",
+    )
+    AlertDialog.Builder(this)
+      .setTitle("Calidad del video")
+      .setSingleChoiceItems(labels, qualities.indexOf(quality)) { dialog, which ->
+        dialog.dismiss()
+        val q = qualities[which]
+        if (q == quality) return@setSingleChoiceItems
+        setQuality(q, save = true)
+        // Reiniciar cámara y codificador con la nueva calidad.
+        if (prepared) {
+          if (stream.isOnPreview) stream.stopPreview()
+          stream.release()
+          prepared = false
+          prepareStream()
+        }
+        toast("Calidad: ${quality.label}")
+      }
+      .show()
+  }
+
+  // ---------------- Salir en vivo ----------------
+
+  private fun goLive(key: String) {
+    saveKey(key)
+    etKey.setText(key)
+    stream.startStream(YOUTUBE_RTMP + key)
+    btnStartStop.setText(R.string.stop)
+    tvStatus.text = "Conectando…"
+    updateLiveUi()
+    startChat()
+  }
+
+  /**
+   * Sin partido elegido: si la cuenta está conectada, ofrece crear el vivo ahora
+   * (con la privacidad elegida). Si no, usa la clave manual.
+   */
+  private fun offerQuickLive() {
+    tvStatus.text = "Revisando cuenta…"
+    btnStartStop.isEnabled = false
+    thread {
+      val token = YouTubeAuth.getTokenSilently(this)
+      runOnUiThread {
+        btnStartStop.isEnabled = true
+        tvStatus.text = "Sin transmitir"
+        if (token != null) showQuickLiveDialog(token) else manualKeyFallback()
+      }
+    }
+  }
+
+  private fun manualKeyFallback() {
+    val key = etKey.text.toString().trim()
+    if (key.isEmpty()) {
+      showInfo("Falta el partido",
+        "Elegí o creá un partido con 📅 PARTIDO (conectando la cuenta de YouTube), " +
+          "o pegá una clave de transmisión.")
+      return
+    }
+    AlertDialog.Builder(this)
+      .setTitle("Transmitir con clave manual")
+      .setMessage("No hay partido elegido ni cuenta conectada. YouTube va a crear el vivo " +
+        "con su configuración por defecto (puede quedar privado) y no se verá el chat. ¿Seguir?")
+      .setPositiveButton("Seguir") { _, _ -> goLive(key) }
+      .setNegativeButton("Cancelar", null)
+      .show()
+  }
+
+  private fun showQuickLiveDialog(token: String) {
+    val pad = (16 * resources.displayMetrics.density).toInt()
+    val box = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding(pad, pad / 2, pad, 0)
+    }
+    val away = matchState?.away?.takeIf { it.isNotBlank() && it != "RIVAL" && it != "VISITA" }
+    val etTitle = EditText(this).apply {
+      setText(if (away != null) "La Peña FC vs ${away.split(" ").joinToString(" ") { w -> w.lowercase().replaceFirstChar { it.uppercase() } }}" else "La Peña FC en vivo")
+      isSingleLine = true
+    }
+    val rg = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
+    val options = listOf("public" to "Público", "unlisted" to "No listado", "private" to "Privado")
+    options.forEachIndexed { i, (_, label) ->
+      rg.addView(RadioButton(this).apply { id = 1000 + i; text = label; isChecked = i == 0 })
+    }
+    box.addView(TextView(this).apply { text = "Título" })
+    box.addView(etTitle)
+    box.addView(rg)
+
+    val builder = AlertDialog.Builder(this)
+      .setTitle("No elegiste partido. ¿Crear un vivo ahora?")
+      .setView(box)
+      .setPositiveButton("CREAR Y TRANSMITIR") { _, _ ->
+        val title = etTitle.text.toString().trim().ifEmpty { "La Peña FC en vivo" }
+        val privacy = options[(rg.checkedRadioButtonId - 1000).coerceIn(0, 2)].first
+        createAndGoLive(token, title, privacy)
+      }
+      .setNegativeButton("Cancelar", null)
+    if (etKey.text.isNotBlank()) {
+      builder.setNeutralButton("Clave manual") { _, _ -> goLive(etKey.text.toString().trim()) }
+    }
+    builder.show()
+  }
+
+  private fun createAndGoLive(token: String, title: String, privacy: String) {
+    tvStatus.text = "Creando vivo en YouTube…"
+    btnStartStop.isEnabled = false
+    thread {
+      try {
+        val created = YouTubeApi.schedule(token, title, "", System.currentTimeMillis() + 60_000, privacy)
+        val (ready, key) = YouTubeApi.prepareForStreaming(token, created)
+        Selection.save(this, Selection(ready.id, ready.title, ready.liveChatId ?: created.liveChatId), key)
+        runOnUiThread {
+          btnStartStop.isEnabled = true
+          loadSelection()
+          goLive(key)
+        }
+      } catch (e: Exception) {
+        runOnUiThread {
+          btnStartStop.isEnabled = true
+          tvStatus.text = "Sin transmitir"
+          showInfo("No se pudo crear el vivo", e.message ?: "Error de YouTube")
+        }
+      }
+    }
   }
 
   // ---------------- Partido de YouTube ----------------
@@ -634,17 +790,28 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     if (missing.isEmpty()) prepareStream() else permissionLauncher.launch(missing.toTypedArray())
   }
 
+  private fun tryPrepare(q: Quality): Boolean = try {
+    stream.prepareVideo(q.w, q.h, q.bitrate, fps = FPS, iFrameInterval = 2) &&
+      stream.prepareAudio(SAMPLE_RATE, true, AUDIO_BITRATE)
+  } catch (e: Exception) {
+    false
+  }
+
   private fun prepareStream() {
     if (prepared) return
-    prepared = try {
-      stream.prepareVideo(WIDTH, HEIGHT, VIDEO_BITRATE, fps = FPS, iFrameInterval = 2) &&
-        stream.prepareAudio(SAMPLE_RATE, true, AUDIO_BITRATE)
-    } catch (e: IllegalArgumentException) {
-      false
+    prepared = tryPrepare(quality)
+    if (!prepared && quality != qualities[1]) {
+      toast("Este celular no soporta ${quality.label}. Se usa 720p.")
+      setQuality(qualities[1], save = true)
+      prepared = tryPrepare(quality)
     }
     if (!prepared) {
       toast("Este celular no soporta la configuración de video/audio")
       return
+    }
+    // Baja la calidad sola si la conexión se pone lenta, para que no se corte.
+    bitrateAdapter = QueueAwareBitrateAdapter(maxBitrate = quality.bitrate + AUDIO_BITRATE) {
+      stream.setVideoBitrateOnFly(it - AUDIO_BITRATE)
     }
     if (surfaceView.holder.surface.isValid && !stream.isOnPreview) {
       startPreviewWithBoard()
@@ -675,7 +842,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   // --- Eventos de conexión (llegan desde otro hilo) ---
 
   override fun onConnectionStarted(url: String) {
-    bitrateAdapter.reset()
+    bitrateAdapter?.reset()
   }
 
   override fun onConnectionSuccess() {
@@ -704,7 +871,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
 
   override fun onStreamingStats(report: StreamingStatsReport) {
     runOnUiThread {
-      bitrateAdapter.onStreamingStats(report)
+      bitrateAdapter?.onStreamingStats(report)
       if (stream.isStreaming && endCardFilter == null && report.throughput != Throughput.UNKNOWN) {
         tvStatus.text = String.format(
           Locale.getDefault(), "● EN VIVO  %.1f Mb/s", report.smoothedBitrate / 1_000_000f
