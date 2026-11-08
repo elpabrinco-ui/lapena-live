@@ -6,7 +6,26 @@ App de Android para transmitir los partidos de La Peña FC a YouTube, sin marcas
 
 1. **Transmitir a YouTube** desde la cámara del celular. ✅
 2. **Escudo y marcador** sobre el video, manejado desde otro celular. ✅ (esta versión)
-3. Comentarios del chat de YouTube en pantalla.
+3. Comentarios del chat de YouTube en pantalla. ✅
+4. **Seguimiento automático** con IA, con o sin motor. 🧪 (en prueba)
+
+## Seguimiento automático (🎯 SEGUIR)
+
+La IA (dentro del celular, sin internet) busca a los jugadores y la pelota unas 4 veces por segundo y mueve el encuadre de a poco, como un camarógrafo.
+
+1. Poné el zoom en **0.5x** (pellizcando la imagen) para que entre toda la cancha.
+2. **Mantené apretado 🎯 SEGUIR** y arrastrá el dedo de una esquina de la cancha a la otra. Lo de afuera (banco, público) no se tiene en cuenta. Queda guardado.
+3. Tocá **🎯 SEGUIR**. Abajo del botón se ve cuántos jugadores encuentra (👥), si ve la pelota (⚽) y el zoom.
+
+Al prenderlo, la cámara se reinicia un instante. El zoom digital llega hasta 2x; con 1080p se ve más nítido.
+
+### Con motor (opcional)
+
+Un motor chico gira el celular para que la jugada quede en el centro, y el recorte digital hace el resto. Piezas, conexiones y programa: carpeta [`firmware/`](firmware/lapena_cam/lapena_cam.ino).
+
+1. Apuntá el celular al medio de la cancha y recién ahí enchufá el motor al power bank (esa posición es el centro).
+2. Con 🎯 SEGUIR activo, tocá **⚙ MOTOR**. Cuando se conecta dice ✓ (y se prende la luz de la placa).
+3. Si gira para el lado equivocado: ⚙ MOTOR → *Invertir giro*.
 
 ## Cómo instalarla
 
