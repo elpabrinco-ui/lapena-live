@@ -4,6 +4,11 @@ import android.Manifest
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.ImageFormat
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
+import android.os.Build
+import android.view.Surface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -31,6 +36,7 @@ import com.pedro.common.StreamingStatsReport
 import com.pedro.common.Throughput
 import com.pedro.encoder.input.gl.render.filters.`object`.ImageObjectFilterRender
 import com.pedro.encoder.input.sources.video.Camera2Source
+import com.pedro.encoder.input.video.CameraHelper
 import com.pedro.library.rtmp.RtmpStream
 import com.pedro.library.util.QueueAwareBitrateAdapter
 import java.util.Locale
@@ -66,6 +72,11 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     private const val CHAT_POLL_MIN_MS = 8000L
     private const val CHAT_SHOW_MS = 20_000L
     private const val CHAT_MAX_VISIBLE = 3
+
+    // Seguimiento automático
+    private const val KEY_ZONE = "follow_zone"
+    private const val KEY_MOTOR_INVERTED = "motor_inverted"
+    private const val FRAMER_TICK_MS = 33L
   }
 
   /** Calidades disponibles: resolución y bitrate máximo. */
@@ -128,9 +139,33 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
       redrawChat(force = false)
       redrawWelcome(force = false)
       redrawViewers(force = false)
+      updateFollowStatus()
       handler.postDelayed(this, 250)
     }
   }
+
+  // --- Seguimiento automático (IA) y motor ---
+  private val framer = AutoFramer()
+  private var tracker: AutoTracker? = null
+  private lateinit var motor: MotorLink
+  private lateinit var btnFollow: Button
+  private lateinit var btnMotor: Button
+  private lateinit var tvFollow: TextView
+  private lateinit var zoneView: ZoneView
+  private var zone = Zone.FULL
+
+  private val framerTick = object : Runnable {
+    override fun run() {
+      framer.tick()
+      tracker?.rotationDegrees = cameraToScreenRotation()
+      handler.postDelayed(this, FRAMER_TICK_MS)
+    }
+  }
+
+  private val btPermissionLauncher =
+    registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+      if (result.values.all { it }) connectMotor() else toast("Sin permiso de Bluetooth no se puede usar el motor")
+    }
 
   // Baja la calidad sola si la conexión se pone lenta, para que no se corte.
   private var bitrateAdapter: QueueAwareBitrateAdapter? = null
@@ -268,6 +303,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     }
 
     btnSwitch.setOnClickListener {
+      if (tracker != null) stopFollow()
       (stream.videoSource as? Camera2Source)?.switchCamera()
     }
 
@@ -290,6 +326,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
       true
     }
 
+    setupFollow()
     restartSubscriber()
     requestPermissionsIfNeeded()
   }
@@ -298,11 +335,13 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     super.onResume()
     if (!stream.isStreaming) loadSelection()
     handler.post(boardTick)
+    handler.post(framerTick)
   }
 
   override fun onPause() {
     super.onPause()
     handler.removeCallbacks(boardTick)
+    handler.removeCallbacks(framerTick)
   }
 
   // ---------------- Marcador ----------------
@@ -343,6 +382,8 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   private fun attachOverlays() {
     val gl = stream.getGlInterface()
     gl.clearFilters()
+    // El recorte del seguimiento va primero: así el marcador y el chat quedan fijos y enteros.
+    framer.attach(gl)
     val board = ImageObjectFilterRender().also { boardFilter = it }
     val chat = ImageObjectFilterRender().also { it.alpha = 0f; chatFilter = it }
     val welcome = ImageObjectFilterRender().also { it.alpha = 0f; welcomeFilter = it }
@@ -492,6 +533,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         setQuality(q, save = true)
         // Reiniciar cámara y codificador con la nueva calidad.
         if (prepared) {
+          if (tracker != null) stopFollow()
           if (stream.isOnPreview) stream.stopPreview()
           stream.release()
           prepared = false
@@ -819,6 +861,177 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     filter.alpha = 1f
   }
 
+  // ---------------- Seguimiento automático y motor ----------------
+
+  private fun setupFollow() {
+    btnFollow = findViewById(R.id.btnFollow)
+    btnMotor = findViewById(R.id.btnMotor)
+    tvFollow = findViewById(R.id.tvFollow)
+    zoneView = findViewById(R.id.zoneView)
+    val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+    zone = Zone.parse(prefs.getString(KEY_ZONE, null))
+
+    motor = MotorLink(this) { updateFollowUi() }
+    motor.inverted = prefs.getBoolean(KEY_MOTOR_INVERTED, false)
+
+    btnFollow.setOnClickListener { if (tracker == null) startFollow() else stopFollow() }
+    btnFollow.setOnLongClickListener { editZone(); true }
+    btnMotor.setOnClickListener {
+      if (motor.state == MotorLink.State.CONNECTED) motorMenu() else askBluetoothAndConnect()
+    }
+    zoneView.onZoneDrawn = { z ->
+      val tooSmall = z.right - z.left < 0.15f || z.bottom - z.top < 0.15f
+      zone = if (tooSmall) Zone.FULL else z
+      prefs.edit().putString(KEY_ZONE, zone.serialize()).apply()
+      tracker?.zone = zone
+      handler.postDelayed({
+        zoneView.visibility = View.GONE
+        framer.showFullFrame = false
+      }, 600)
+      toast(if (tooSmall) "Se usa toda la imagen como cancha" else "Cancha guardada")
+    }
+    updateFollowUi()
+  }
+
+  private fun startFollow() {
+    val cam = stream.videoSource as? Camera2Source
+    if (!prepared || cam == null) {
+      toast("Esperá a que se vea la cámara")
+      return
+    }
+    if (cam.getCameraFacing() == CameraHelper.Facing.FRONT) {
+      toast("El seguimiento funciona con la cámara de atrás")
+      return
+    }
+    val t = AutoTracker(this) { result ->
+      framer.onDetections(result)
+      handler.post { motor.setSpeed(framer.motorSpeed) }
+    }
+    t.zone = zone
+    t.rotationDegrees = cameraToScreenRotation()
+    tracker = t
+    // Agregar el lector de imágenes reinicia la cámara un instante (y pierde el zoom): lo volvemos a poner.
+    val zoomBefore = try { cam.getZoom() } catch (e: Exception) { 1f }
+    cam.addImageListener(ImageFormat.YUV_420_888, 3, true, t)
+    handler.postDelayed({ if (zoomBefore != 1f) setZoom(zoomBefore) }, 1200)
+    framer.setEnabled(true)
+    updateFollowUi()
+    handler.postDelayed({
+      t.failed?.let { toast("No se pudo cargar la IA: $it"); stopFollow() }
+    }, 3000)
+    if (zone.isFull()) toast("Tip: mantené apretado 🎯 para marcar la cancha")
+  }
+
+  private fun stopFollow() {
+    val t = tracker ?: return
+    tracker = null
+    framer.setEnabled(false)
+    if (::motor.isInitialized) motor.setSpeed(0)
+    t.release()
+    try { (stream.videoSource as? Camera2Source)?.removeImageListener() } catch (_: Exception) {}
+    updateFollowUi()
+  }
+
+  private fun editZone() {
+    if (!prepared) return
+    framer.showFullFrame = true
+    zoneView.videoAspect = quality.w.toFloat() / quality.h
+    zoneView.zone = zone
+    zoneView.visibility = View.VISIBLE
+  }
+
+  private fun updateFollowUi() {
+    if (!::btnFollow.isInitialized) return
+    val on = tracker != null
+    btnFollow.text = if (on) "🎯 SIGUIENDO" else "🎯 SEGUIR"
+    btnFollow.backgroundTintList = if (on) android.content.res.ColorStateList.valueOf(0xFF2E7D32.toInt()) else null
+    btnMotor.visibility = if (on || motor.state != MotorLink.State.OFF) View.VISIBLE else View.GONE
+    btnMotor.text = when (motor.state) {
+      MotorLink.State.OFF -> "⚙ MOTOR"
+      MotorLink.State.SEARCHING -> "⚙ BUSCANDO…"
+      MotorLink.State.CONNECTED -> "⚙ MOTOR ✓"
+    }
+    btnMotor.backgroundTintList = if (motor.state == MotorLink.State.CONNECTED)
+      android.content.res.ColorStateList.valueOf(0xFF2E7D32.toInt()) else null
+    updateFollowStatus()
+  }
+
+  private fun updateFollowStatus() {
+    if (!::tvFollow.isInitialized) return
+    if (tracker == null) {
+      tvFollow.visibility = View.GONE
+      return
+    }
+    val ball = if (framer.ballSeen) " · ⚽" else ""
+    val zoom = String.format(Locale.getDefault(), "%.1fx", framer.currentZoom())
+    tvFollow.text = "👥 ${framer.playersSeen}$ball · $zoom"
+    tvFollow.visibility = View.VISIBLE
+  }
+
+  private fun askBluetoothAndConnect() {
+    val needed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+    } else {
+      arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+    val missing = needed.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+    if (missing.isEmpty()) connectMotor() else btPermissionLauncher.launch(missing.toTypedArray())
+  }
+
+  private fun connectMotor() {
+    if (!motor.bluetoothOn) {
+      toast("Prendé el Bluetooth del celular")
+      return
+    }
+    motor.connect()
+    toast("Buscando el motor… (tiene que estar prendido)")
+  }
+
+  private fun motorMenu() {
+    val invertLabel = if (motor.inverted) "Invertir giro (ahora: invertido)" else "Invertir giro (ahora: normal)"
+    AlertDialog.Builder(this)
+      .setTitle("Motor")
+      .setItems(arrayOf("Volver al centro", "Marcar esta posición como centro", invertLabel, "Desconectar")) { _, which ->
+        when (which) {
+          0 -> motor.center()
+          1 -> { motor.setHome(); toast("Listo: este es el centro") }
+          2 -> {
+            motor.inverted = !motor.inverted
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_MOTOR_INVERTED, motor.inverted).apply()
+            toast(if (motor.inverted) "Giro invertido" else "Giro normal")
+          }
+          3 -> motor.disconnect()
+        }
+      }
+      .setNegativeButton("Cerrar", null)
+      .show()
+  }
+
+  /** Cuántos grados hay que girar la imagen de la cámara de atrás para verla derecha en pantalla. */
+  private var sensorOrientation: Int? = null
+  @Suppress("DEPRECATION")
+  private fun cameraToScreenRotation(): Int {
+    val sensor = sensorOrientation ?: run {
+      val cm = getSystemService(CAMERA_SERVICE) as CameraManager
+      val value = try {
+        cm.cameraIdList.firstNotNullOfOrNull { id ->
+          val ch = cm.getCameraCharacteristics(id)
+          if (ch.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK)
+            ch.get(CameraCharacteristics.SENSOR_ORIENTATION) else null
+        } ?: 90
+      } catch (e: Exception) { 90 }
+      sensorOrientation = value
+      value
+    }
+    val display = when (windowManager.defaultDisplay.rotation) {
+      Surface.ROTATION_90 -> 90
+      Surface.ROTATION_180 -> 180
+      Surface.ROTATION_270 -> 270
+      else -> 0
+    }
+    return (sensor - display + 360) % 360
+  }
+
   // ---------------- Zoom ----------------
 
   private fun setupPinchZoom() {
@@ -933,6 +1146,9 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     handler.removeCallbacksAndMessages(null)
     subscriber?.stop()
     chatPoller?.running = false
+    tracker?.release()
+    tracker = null
+    if (::motor.isInitialized) motor.disconnect()
     if (stream.isStreaming) stream.stopStream()
     stream.release()
   }
