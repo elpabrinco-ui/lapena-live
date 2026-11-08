@@ -1,3 +1,5 @@
+import java.net.URI
+
 plugins {
   id("com.android.application")
 }
@@ -58,14 +60,14 @@ dependencies {
 // Modelo de IA (EfficientDet-Lite0, de Google, licencia Apache 2.0). Se descarga al compilar
 // para no guardar un archivo binario grande en el repositorio.
 val modelFile = layout.projectDirectory.file("src/main/assets/efficientdet_lite0.tflite")
-val downloadModel by tasks.registering {
+val downloadModel = tasks.register("downloadModel") {
   val target = modelFile.asFile
   outputs.file(target)
   doLast {
     if (!target.exists() || target.length() < 1000) {
       target.parentFile.mkdirs()
       val url = "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/1/efficientdet_lite0.tflite"
-      java.net.URI(url).toURL().openStream().use { input -> target.outputStream().use { input.copyTo(it) } }
+      URI(url).toURL().openStream().use { input -> target.outputStream().use { input.copyTo(it) } }
     }
   }
 }
