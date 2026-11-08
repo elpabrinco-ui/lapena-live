@@ -33,6 +33,14 @@ class LineupActivity : AppCompatActivity() {
 
     private val F7_FORMATIONS = listOf("2-3-1", "3-2-1", "3-1-2", "2-2-2", "3-3", "2-1-2-1")
     private val FUTSAL_FORMATIONS = listOf("1-2-1", "2-2", "1-1-2", "3-1")
+
+    /** Plantel oficial de La Peña: viene incluido en la app. */
+    val OFFICIAL_ROSTER = listOf(
+      Player("1", "Leo"), Player("3", "Marian"), Player("4", "Walter"), Player("5", "Mati"),
+      Player("6", "Lucas M"), Player("7", "Juant"), Player("8", "Marcos"), Player("9", "Jon"),
+      Player("10", "Juanca"), Player("11", "Eros"), Player("12", "Cuba"), Player("14", "Fer"),
+      Player("19", "Pablito"), Player("21", "Juani"),
+    )
   }
 
   private var state = MatchState()
@@ -200,14 +208,10 @@ class LineupActivity : AppCompatActivity() {
     return if (parts.size == 2 && parts[0].all { it.isDigit() }) Player(parts[0], parts[1]) else Player("", line.trim())
   }
 
-  /** Plantel guardado; la primera vez se arma con los jugadores ya cargados. */
+  /** Plantel editado en este celular; si no hay, el plantel oficial incluido en la app. */
   private fun loadRoster(): List<Player> {
-    val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    val saved = prefs.getString("roster", null)
-    if (saved != null) return saved.lines().filter { it.isNotBlank() }.map(::parsePlayer)
-    val seeded = (state.starters + state.subs).filter { it.name.isNotEmpty() }.distinctBy { it.name.lowercase() }
-    if (seeded.isNotEmpty()) saveRoster(seeded)
-    return seeded
+    val saved = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("roster", null)
+    return saved?.lines()?.filter { it.isNotBlank() }?.map(::parsePlayer) ?: OFFICIAL_ROSTER
   }
 
   private fun saveRoster(list: List<Player>) {
@@ -230,6 +234,12 @@ class LineupActivity : AppCompatActivity() {
       .setPositiveButton("Guardar") { _, _ ->
         roster = et.text.toString().lines().filter { it.isNotBlank() }.map(::parsePlayer)
         saveRoster(roster)
+        button.text = "EDITAR PLANTEL (${roster.size})"
+      }
+      .setNeutralButton("Plantel oficial") { _, _ ->
+        // Vuelve a la lista incluida en la app y borra los cambios de este celular.
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove("roster").apply()
+        roster = OFFICIAL_ROSTER
         button.text = "EDITAR PLANTEL (${roster.size})"
       }
       .setNegativeButton("Cancelar", null)
