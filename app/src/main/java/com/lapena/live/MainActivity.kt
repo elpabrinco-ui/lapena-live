@@ -64,7 +64,9 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
 
     // Chat: cada cuánto consultar (cuida el cupo diario de la API) y cuánto tiempo se ve cada mensaje
     private const val CHAT_POLL_MIN_MS = 8000L
-    private const val CHAT_SHOW_MS = 20_000L
+    // Cada comentario se ve 25 s, más tiempo si es largo (hasta 45 s).
+    private const val CHAT_SHOW_MS = 25_000L
+    private const val CHAT_SHOW_MAX_MS = 45_000L
     private const val CHAT_MAX_VISIBLE = 3
   }
 
@@ -106,6 +108,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   private lateinit var tvSyncDot: TextView
   private lateinit var tvZoom: TextView
   private var lastWelcomeKey = ""
+  private var welcomeMuted = false
   private var chatPoller: ChatPoller? = null
   private data class ChatItem(val msg: YouTubeApi.ChatMessage, val at: Long, val n: Long)
   private val chatItems = ArrayList<ChatItem>()
@@ -364,6 +367,14 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   }
 
   /** Pantalla de bienvenida con la formación: se muestra/oculta desde el celular de control. */
+  /** Micrófono silenciado mientras se ve la bienvenida (la pantalla final maneja el suyo). */
+  private fun setWelcomeMute(mute: Boolean) {
+    if (mute == welcomeMuted) return
+    welcomeMuted = mute
+    val mic = stream.audioSource as? MicrophoneSource ?: return
+    if (mute) mic.mute() else if (endCardFilter == null) mic.unMute()
+  }
+
   private fun redrawWelcome(force: Boolean) {
     val filter = welcomeFilter ?: return
     val state = matchState
@@ -372,8 +383,10 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         filter.alpha = 0f
         lastWelcomeKey = "off"
       }
+      setWelcomeMute(false)
       return
     }
+    setWelcomeMute(true)
     val compact = welcomeWithChat()
     val key = listOf(state.home, state.away, state.formation, state.starters, state.subs, compact).toString()
     if (!force && key == lastWelcomeKey) return
@@ -751,6 +764,9 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     redrawChat(force = false)
   }
 
+  private fun showTimeMs(m: YouTubeApi.ChatMessage): Long =
+    (CHAT_SHOW_MS + m.text.length * 150L).coerceAtMost(CHAT_SHOW_MAX_MS)
+
   /** Si hay chat activo, la bienvenida deja lugar abajo a la izquierda. */
   private fun welcomeWithChat(): Boolean =
     chatPoller != null && (matchState?.chat ?: true)
@@ -760,13 +776,14 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     val now = System.currentTimeMillis()
     val enabled = matchState?.chat ?: true
     val visible = if (!enabled) emptyList() else chatItems
-      .filter { it.at <= now && now - it.at < CHAT_SHOW_MS }
+      .filter { it.at <= now && now - it.at < showTimeMs(it.msg) }
       .takeLast(if (matchState?.welcome == true) 2 else CHAT_MAX_VISIBLE)
     val key = visible.joinToString(",") { it.n.toString() }
     if (!force && key == lastChatKey) return
     lastChatKey = key
 
-    val bmp = renderer.renderChat(visible.map { it.msg })
+    // En la bienvenida hay menos lugar: hasta 2 líneas; en el partido, hasta 4.
+    val bmp = renderer.renderChat(visible.map { it.msg }, if (matchState?.welcome == true) 2 else 4)
     if (bmp == null) {
       filter.alpha = 0f
       return
