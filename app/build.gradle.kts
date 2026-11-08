@@ -17,18 +17,19 @@ android {
   }
 
   signingConfigs {
-    getByName("debug") {
-      // Fixed debug key so new versions install over old ones.
-      storeFile = file("debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
+    // Llave privada: vive en los secretos de GitHub, nunca en el código.
+    create("release") {
+      storeFile = file(System.getenv("KEYSTORE_FILE") ?: "release.jks")
+      storePassword = System.getenv("KEYSTORE_PASSWORD")
+      keyAlias = System.getenv("KEY_ALIAS")
+      keyPassword = System.getenv("KEYSTORE_PASSWORD")
     }
   }
 
   buildTypes {
     release {
       isMinifyEnabled = false
+      signingConfig = signingConfigs.getByName("release")
     }
   }
   compileOptions {
