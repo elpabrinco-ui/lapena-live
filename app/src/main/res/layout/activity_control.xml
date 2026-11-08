@@ -79,7 +79,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:text="F7 · 30'" />
+        android:text="F7 · 30' ↑" />
 
       <Button
         android:id="@+id/btnFutsal"
@@ -87,7 +87,7 @@
         android:layout_height="wrap_content"
         android:layout_marginStart="8dp"
         android:layout_weight="1"
-        android:text="FUTSAL · 20'" />
+        android:text="FUTSAL · 20' ↓" />
     </LinearLayout>
 
     <!-- Nombres -->
@@ -186,7 +186,7 @@
 
       <Button android:id="@+id/btnMinusMin" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="−1'" />
       <Button android:id="@+id/btnPlusMin" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:layout_weight="1" android:text="+1'" />
-      <Button android:id="@+id/btnResetClock" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:layout_weight="1" android:text="00:00" />
+      <Button android:id="@+id/btnResetClock" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:layout_weight="1" android:text="REINICIAR" />
     </LinearLayout>
 
     <LinearLayout
@@ -207,6 +207,14 @@
       android:buttonTint="#FFFFFF"
       android:checked="true"
       android:text="Mostrar marcador en el video"
+      android:textColor="#FFFFFF" />
+
+    <CheckBox
+      android:id="@+id/cbViewers"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:buttonTint="#FFFFFF"
+      android:text="Mostrar espectadores en el video"
       android:textColor="#FFFFFF" />
 
     <CheckBox

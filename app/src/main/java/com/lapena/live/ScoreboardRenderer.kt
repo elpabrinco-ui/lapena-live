@@ -25,6 +25,7 @@ class ScoreboardRenderer(context: Context) {
     const val HEIGHT = 64
     const val S = 2f // factor de nitidez
     const val CHAT_W = 400
+    const val VIEWERS_H = 30
 
     private const val CREST_W = 64f
     private const val NAME_MIN_W = 100f
@@ -194,6 +195,31 @@ class ScoreboardRenderer(context: Context) {
       drawCentered(c, home, cx - resultHalf - gap - score.measureText(home) / 2, cy, score)
       drawCentered(c, away, cx + resultHalf + gap + score.measureText(away) / 2, cy, score)
     }
+    return bmp
+  }
+
+  // ---------------- Espectadores ----------------
+
+  /** Cartelito "● 23 viendo" (alto 30 px del video). */
+  fun renderViewers(count: Int): Bitmap {
+    val text = "$count viendo"
+    val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.WHITE
+      typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+      textSize = 17 * S
+    }
+    val h = (VIEWERS_H * S).toInt()
+    val dotR = 5 * S
+    val w = (p.measureText(text) + 12 * S + dotR * 2 + 8 * S + 12 * S).toInt()
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    fill.color = DARK
+    c.drawRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), h / 2f, h / 2f, fill)
+    fill.color = Color.parseColor("#FF3B30")
+    c.drawCircle(12 * S + dotR, h / 2f, dotR, fill)
+    p.textAlign = Paint.Align.LEFT
+    val b = Rect(); p.getTextBounds("0A", 0, 2, b)
+    c.drawText(text, 12 * S + dotR * 2 + 8 * S, h / 2f - b.exactCenterY(), p)
     return bmp
   }
 

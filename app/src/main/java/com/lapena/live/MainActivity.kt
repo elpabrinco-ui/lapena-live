@@ -99,6 +99,12 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   private lateinit var btnMatch: Button
   private var chatFilter: ImageObjectFilterRender? = null
   private var welcomeFilter: ImageObjectFilterRender? = null
+  private var viewersFilter: ImageObjectFilterRender? = null
+  private var lastViewersKey = ""
+  @Volatile private var viewerCount: Int? = null
+  @Volatile private var viewersRunning = false
+  private lateinit var tvSyncDot: TextView
+  private lateinit var tvZoom: TextView
   private var lastWelcomeKey = ""
   private var chatPoller: ChatPoller? = null
   private data class ChatItem(val msg: YouTubeApi.ChatMessage, val at: Long, val n: Long)
@@ -121,6 +127,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
       redrawBoard(force = false)
       redrawChat(force = false)
       redrawWelcome(force = false)
+      redrawViewers(force = false)
       handler.postDelayed(this, 250)
     }
   }
@@ -149,6 +156,11 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     saverCover = findViewById(R.id.saverCover)
     val btnSwitch = findViewById<Button>(R.id.btnSwitch)
     tvMatch = findViewById(R.id.tvMatch)
+    tvSyncDot = findViewById(R.id.tvSyncDot)
+    tvSyncDot.setOnClickListener { toast("Código del partido: $matchCode") }
+    tvZoom = findViewById(R.id.tvZoom)
+    tvZoom.setOnClickListener { setZoom(1f) }
+    setupPinchZoom()
     btnMatch = findViewById(R.id.btnMatch)
     btnMatch.setOnClickListener {
       startActivity(Intent(this, BroadcastsActivity::class.java)
@@ -318,6 +330,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   private fun updateCodeLabel() {
     val dot = if (syncOnline) "🟢" else "⚪"
     tvCode.text = "$dot Código: $matchCode"
+    if (::tvSyncDot.isInitialized) tvSyncDot.text = dot
   }
 
   /** Inicia la vista previa y vuelve a poner los gráficos (la librería borra los filtros al parar). */
@@ -334,7 +347,9 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     val chat = ImageObjectFilterRender().also { it.alpha = 0f; chatFilter = it }
     val welcome = ImageObjectFilterRender().also { it.alpha = 0f; welcomeFilter = it }
     // El chat va encima de la bienvenida para que se vea también en la previa.
+    val viewers = ImageObjectFilterRender().also { it.alpha = 0f; viewersFilter = it }
     gl.addFilter(board)
+    gl.addFilter(viewers)
     gl.addFilter(welcome)
     gl.addFilter(chat)
     endCardBitmap?.let { bmp ->
@@ -345,6 +360,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     redrawBoard(force = true)
     redrawChat(force = true)
     redrawWelcome(force = true)
+    redrawViewers(force = true)
   }
 
   /** Pantalla de bienvenida con la formación: se muestra/oculta desde el celular de control. */
@@ -384,7 +400,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     if (!force && key == lastDrawnKey) return
     lastDrawnKey = key
 
-    val bmp = renderer.render(state, clock)
+    val bmp = renderer.render(state, state.displayMs(clock))
     filter.setImage(bmp)
     // El ancho cambia según los nombres: escalar según el tamaño real de la imagen.
     filter.setScale(
@@ -444,6 +460,8 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     btnPaste.visibility = if (live) View.GONE else View.VISIBLE
     btnMatch.visibility = if (live) View.GONE else View.VISIBLE
     btnQuality.visibility = if (live) View.GONE else View.VISIBLE
+    // En vivo el código se oculta para no tapar el chat; queda el puntito arriba.
+    tvCode.visibility = if (live) View.GONE else View.VISIBLE
     tvMatch.visibility = if (live || selection == null) View.GONE else View.VISIBLE
   }
 
@@ -668,12 +686,15 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   // ---------------- Chat ----------------
 
   private fun startChat() {
+    startViewers()
     stopChat()
     val chatId = selection?.liveChatId ?: return
     chatPoller = ChatPoller(chatId).also { it.start() }
   }
 
   private fun stopChat() {
+    viewersRunning = false
+    viewerCount = null
     chatPoller?.running = false
     chatPoller = null
     chatItems.clear()
@@ -755,6 +776,79 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     filter.setScale(ScoreboardRenderer.CHAT_W * 100f / WIDTH, hPct)
     filter.setPosition(2f, 100f - hPct - 4f)
     filter.alpha = 1f
+  }
+
+  // ---------------- Espectadores ----------------
+
+  /** Consulta cada 30 s cuánta gente mira (1 unidad de cupo por consulta). */
+  private fun startViewers() {
+    val sel = selection ?: return
+    if (viewersRunning) return
+    viewersRunning = true
+    thread(name = "viewers", isDaemon = true) {
+      while (viewersRunning) {
+        try {
+          val token = YouTubeAuth.getTokenSilently(this)
+          if (token != null) {
+            viewerCount = YouTubeApi.concurrentViewers(token, sel.broadcastId)
+            handler.post { redrawViewers(force = false) }
+          }
+        } catch (e: Exception) { /* sin señal: reintenta */ }
+        try { Thread.sleep(30_000) } catch (e: InterruptedException) { }
+      }
+    }
+  }
+
+  private fun redrawViewers(force: Boolean) {
+    val filter = viewersFilter ?: return
+    val state = matchState
+    val count = viewerCount
+    val show = state != null && state.viewers && state.visible && count != null
+    val key = if (show) "v$count" else "off"
+    if (!force && key == lastViewersKey) return
+    lastViewersKey = key
+    if (!show) {
+      filter.alpha = 0f
+      return
+    }
+    val bmp = renderer.renderViewers(count!!)
+    filter.setImage(bmp)
+    filter.setScale(bmp.width / ScoreboardRenderer.S * 100f / WIDTH, ScoreboardRenderer.VIEWERS_H * 100f / HEIGHT)
+    // Debajo del marcador
+    filter.setPosition(BOARD_X, BOARD_Y + ScoreboardRenderer.HEIGHT * 100f / HEIGHT + 1.2f)
+    filter.alpha = 1f
+  }
+
+  // ---------------- Zoom ----------------
+
+  private fun setupPinchZoom() {
+    val detector = android.view.ScaleGestureDetector(this,
+      object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScale(d: android.view.ScaleGestureDetector): Boolean {
+          val cam = stream.videoSource as? Camera2Source ?: return false
+          setZoom(cam.getZoom() * d.scaleFactor)
+          return true
+        }
+      })
+    surfaceView.setOnTouchListener { v, event ->
+      detector.onTouchEvent(event)
+      if (event.action == android.view.MotionEvent.ACTION_UP) v.performClick()
+      true
+    }
+  }
+
+  private val hideZoomLabel = Runnable { if (::tvZoom.isInitialized) tvZoom.visibility = View.GONE }
+
+  private fun setZoom(level: Float) {
+    val cam = stream.videoSource as? Camera2Source ?: return
+    val range = try { cam.getZoomRange() } catch (e: Exception) { return }
+    val z = level.coerceIn(range.lower, range.upper)
+    cam.setZoom(z)
+    tvZoom.text = String.format(Locale.getDefault(), "%.1fx", z)
+    tvZoom.visibility = View.VISIBLE
+    handler.removeCallbacks(hideZoomLabel)
+    // El indicador queda visible mientras hay zoom; a 1x se oculta solo.
+    if (z <= range.lower + 0.05f) handler.postDelayed(hideZoomLabel, 1500)
   }
 
   // ---------------- Modo ahorro ----------------
@@ -877,8 +971,9 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     runOnUiThread {
       bitrateAdapter?.onStreamingStats(report)
       if (stream.isStreaming && endCardFilter == null && report.throughput != Throughput.UNKNOWN) {
+        val v = viewerCount?.let { "  ·  👁 $it" } ?: ""
         tvStatus.text = String.format(
-          Locale.getDefault(), "● EN VIVO  %.1f Mb/s", report.smoothedBitrate / 1_000_000f
+          Locale.getDefault(), "● EN VIVO  %.1f Mb/s%s", report.smoothedBitrate / 1_000_000f, v
         )
       }
     }

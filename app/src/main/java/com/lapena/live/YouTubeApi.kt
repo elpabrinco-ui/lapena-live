@@ -195,6 +195,12 @@ object YouTubeApi {
     call(token, "POST", "liveBroadcasts/transition?broadcastStatus=complete&id=${enc(broadcastId)}&part=status")
   }
 
+  /** Espectadores en vivo ahora (null si YouTube no lo informa todavía). Cuesta 1 unidad. */
+  fun concurrentViewers(token: String, broadcastId: String): Int? =
+    items(call(token, "GET", "videos?part=liveStreamingDetails&id=${enc(broadcastId)}"))
+      .firstOrNull()?.optJSONObject("liveStreamingDetails")
+      ?.optString("concurrentViewers")?.toIntOrNull()
+
   // ---------------- Chat ----------------
 
   fun chatMessages(token: String, liveChatId: String, pageToken: String?): ChatPage {

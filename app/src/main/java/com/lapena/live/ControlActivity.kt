@@ -81,6 +81,9 @@ class ControlActivity : AppCompatActivity() {
     etHome.setText(state.home)
     etAway.setText(state.away)
     cbVisible.isChecked = state.visible
+    val cbViewers = findViewById<CheckBox>(R.id.cbViewers)
+    cbViewers.isChecked = state.viewers
+    cbViewers.setOnCheckedChangeListener { _, checked -> change { copy(viewers = checked) } }
     val cbChat = findViewById<CheckBox>(R.id.cbChat)
     cbChat.isChecked = state.chat
     cbChat.setOnCheckedChangeListener { _, checked -> change { copy(chat = checked) } }
@@ -118,7 +121,7 @@ class ControlActivity : AppCompatActivity() {
     findViewById<Button>(R.id.btnPlusMin).setOnClickListener { adjustClock(60_000) }
     findViewById<Button>(R.id.btnMinusMin).setOnClickListener { adjustClock(-60_000) }
     findViewById<Button>(R.id.btnResetClock).setOnClickListener {
-      confirm("¿Poner el reloj en 00:00?") { change { copy(running = false, elapsedMs = 0) } }
+      confirm("¿Reiniciar el reloj de este tiempo?") { change { copy(running = false, elapsedMs = 0) } }
     }
 
     btnP1.setOnClickListener { setPeriod(1) }
@@ -176,7 +179,9 @@ class ControlActivity : AppCompatActivity() {
     }
   }
 
-  private fun adjustClock(deltaMs: Long) {
+  private fun adjustClock(deltaMsRaw: Long) {
+    // En regresivo, "+1'" suma tiempo restante (o sea, resta tiempo jugado).
+    val deltaMs = if (state.countdown) -deltaMsRaw else deltaMsRaw
     val now = System.currentTimeMillis()
     change { copy(elapsedMs = (clockNow(now) + deltaMs).coerceAtLeast(0), sentAt = now) }
   }
@@ -226,7 +231,7 @@ class ControlActivity : AppCompatActivity() {
 
   private fun updateClockView() {
     val ms = state.clockNow()
-    tvClock.text = "${state.period}T  ${MatchState.formatClock(ms)}"
+    tvClock.text = "${state.period}T  ${MatchState.formatClock(state.displayMs(ms))}"
     val limit = state.periodMinutes * 60_000L
     tvTimeUp.text = if (ms >= limit) "⏱ Se cumplieron los ${state.periodMinutes}' del tiempo" else ""
   }

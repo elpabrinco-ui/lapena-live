@@ -23,6 +23,7 @@ data class MatchState(
   val visible: Boolean = true,
   val chat: Boolean = true,         // mostrar comentarios de YouTube en el video
   val welcome: Boolean = false,     // pantalla de bienvenida con la formación
+  val viewers: Boolean = false,     // mostrar cantidad de espectadores en el video
   val formation: String = "2-3-1",  // líneas de campo, de defensa a ataque
   val starters: List<Player> = emptyList(), // [0] = arquero, después por líneas
   val subs: List<Player> = emptyList(),
@@ -33,6 +34,14 @@ data class MatchState(
     return elapsedMs + (now - sentAt).coerceAtLeast(0)
   }
 
+  /** Futsal (20') usa reloj regresivo; F7 cuenta para adelante. */
+  val countdown: Boolean get() = periodMinutes == 20
+
+  /** Lo que se muestra en el reloj: tiempo jugado, o tiempo restante en futsal. */
+  fun displayMs(clockMs: Long): Long =
+    // En regresivo se redondea hacia arriba: no muestra 00:00 hasta que de verdad termina.
+    if (countdown) (periodMinutes * 60_000L - clockMs + 999).coerceAtLeast(0) else clockMs
+
   fun toJson(): String = JSONObject().apply {
     put("v", 1)
     put("home", home); put("away", away)
@@ -42,6 +51,7 @@ data class MatchState(
     put("vis", visible)
     put("chat", chat)
     put("wel", welcome)
+    put("vw", viewers)
     put("fm", formation)
     put("st", playersToJson(starters))
     put("sb", playersToJson(subs))
@@ -63,6 +73,7 @@ data class MatchState(
         visible = o.optBoolean("vis", true),
         chat = o.optBoolean("chat", true),
         welcome = o.optBoolean("wel", false),
+        viewers = o.optBoolean("vw", false),
         formation = o.optString("fm", "2-3-1"),
         starters = playersFromJson(o.optJSONArray("st")),
         subs = playersFromJson(o.optJSONArray("sb")),
