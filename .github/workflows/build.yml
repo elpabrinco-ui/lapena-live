@@ -60,3 +60,18 @@ jobs:
             --title "La Peña Live – última versión" \
             --notes "Build automático del commit ${GITHUB_SHA::7}. Descargá LaPenaLive.apk e instalalo en el celular. [versionCode=${GITHUB_RUN_NUMBER}]" \
             --prerelease
+
+      # Ramas de prueba: se publican aparte ("prueba-<rama>"), sin tocar la versión que usa todo el equipo.
+      - name: Publish test release
+        if: github.ref != 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          TAG="prueba-${BRANCH//\//-}"
+          gh release delete "$TAG" --yes --cleanup-tag || true
+          gh release create "$TAG" LaPenaLive.apk \
+            --target "$GITHUB_SHA" \
+            --title "La Peña Live – PRUEBA ($BRANCH)" \
+            --notes "Versión de prueba de la rama $BRANCH (commit ${GITHUB_SHA::7}). No es la versión del equipo. [versionCode=${GITHUB_RUN_NUMBER}]" \
+            --prerelease
