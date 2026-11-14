@@ -29,6 +29,8 @@ class AutoFramer {
     private const val ZOOM_DEADZONE = 0.04f
     // Si no ve a nadie durante este tiempo, abre el plano de a poco.
     private const val LOST_AFTER_MS = 2500L
+    // Cuánto tiempo "recuerda" la pelota después de dejar de verla.
+    private const val BALL_MEMORY_MS = 1200L
 
     // Motor: zona muerta alrededor del centro y velocidad máxima (pasos por segundo del firmware).
     private const val MOTOR_DEADZONE = 0.10f
@@ -75,6 +77,7 @@ class AutoFramer {
     enabled = on
     if (!on) {
       targetX = 0.5f; targetY = 0.5f; targetW = 1f
+      ballAt = 0L; ballVx = 0f; ballVy = 0f
       motorSpeed = 0
       playersSeen = 0
       ballSeen = false
@@ -83,42 +86,96 @@ class AutoFramer {
     }
   }
 
-  /** Resultado de la IA (llega ~4 veces por segundo). */
+  /** Qué sigue: la pelota (con los jugadores de respaldo) o solo el grupo de jugadores. */
+  enum class Mode { BALL, PLAYERS }
+  @Volatile var mode = Mode.BALL
+
+  // Seguimiento de la pelota: última posición confirmada y velocidad (en "pantallas por segundo").
+  private var ballX = 0.5f
+  private var ballY = 0.5f
+  private var ballVx = 0f
+  private var ballVy = 0f
+  private var ballAt = 0L
+
+  /** Dónde debería mirar la "lupa" de la IA en el próximo análisis. */
+  @Volatile var focusX = 0.5f
+    private set
+  @Volatile var focusY = 0.5f
+    private set
+
+  /** Resultado de la IA (llega ~5 veces por segundo). */
   fun onDetections(r: AutoTracker.Result) {
     if (!enabled) return
+    val now = SystemClock.elapsedRealtime()
     playersSeen = r.players.size
-    ballSeen = r.ball != null
-    if (r.players.size < 2 && r.ball == null) {
-      if (SystemClock.elapsedRealtime() - lastSeenAt > LOST_AFTER_MS) {
+
+    // --- Jugadores: centro y ancho del juego ---
+    var px = Float.NaN
+    var py = Float.NaN
+    var spread = 0f
+    if (r.players.size >= 2) {
+      val xs = r.players.map { it.cx }.sorted()
+      val ys = r.players.map { it.cy }.sorted()
+      px = xs[xs.size / 2]
+      py = ys[ys.size / 2]
+      // Ancho donde está "casi todo el juego" (sin el 10% de cada punta, por ejemplo el arquero lejos).
+      val lo = xs[(xs.size * 0.1f).toInt()]
+      val hi = xs[((xs.size - 1) * 0.9f).toInt().coerceAtLeast(0)]
+      spread = hi - lo
+    }
+
+    // --- Pelota: elegir la detección creíble y actualizar posición y velocidad ---
+    val ball = pickBall(r, now)
+    ballSeen = ball != null
+    if (ball != null) {
+      val dt = (now - ballAt) / 1000f
+      if (ballAt > 0 && dt in 0.05f..1.0f) {
+        // Velocidad suavizada (una sola medición puede ser ruido).
+        ballVx = 0.6f * ballVx + 0.4f * ((ball.cx - ballX) / dt)
+        ballVy = 0.6f * ballVy + 0.4f * ((ball.cy - ballY) / dt)
+      } else {
+        ballVx = 0f; ballVy = 0f
+      }
+      ballX = ball.cx; ballY = ball.cy; ballAt = now
+    }
+    val ballAge = now - ballAt
+    // Si la dejó de ver hace poco, la "imagina" donde debería estar (sigue su recorrido un ratito).
+    val ballRecent = ballAt > 0 && ballAge < BALL_MEMORY_MS
+    val predT = (ballAge / 1000f).coerceAtMost(0.5f)
+    val bx = (ballX + ballVx * predT).coerceIn(0f, 1f)
+    val by = (ballY + ballVy * predT).coerceIn(0f, 1f)
+
+    // --- Decidir el encuadre ---
+    var x: Float
+    var y: Float
+    var w: Float
+    if (mode == Mode.BALL && ballRecent) {
+      // La pelota manda. Los jugadores tiran un poco para que se vea la jugada, no solo la pelota.
+      val pull = if (px.isNaN()) 0f else 0.2f
+      x = bx * (1 - pull) + (if (px.isNaN()) 0f else px * pull)
+      y = by * (1 - pull) + (if (py.isNaN()) 0f else py * pull)
+      // Más abierto si la pelota va rápido o si hace rato que no la ve (para no perderla).
+      val speed = kotlin.math.sqrt(ballVx * ballVx + ballVy * ballVy)
+      w = 0.55f + (speed * 0.25f).coerceAtMost(0.2f) + (ballAge / BALL_MEMORY_MS.toFloat()) * 0.15f
+      focusX = bx; focusY = by
+    } else if (!px.isNaN()) {
+      x = px; y = py
+      w = spread + 0.30f
+      if (mode == Mode.BALL) w += 0.1f  // sin pelota: un poco más abierto hasta encontrarla
+      r.ball?.let { b ->
+        x = 0.55f * b.cx + 0.45f * px
+        y = 0.5f * b.cy + 0.5f * py
+      }
+      focusX = px; focusY = py
+    } else {
+      if (now - lastSeenAt > LOST_AFTER_MS) {
         targetW = 1f; targetX = 0.5f; targetY = 0.5f
+        focusX = 0.5f; focusY = 0.5f
       }
       motorSpeed = 0
       return
     }
-    lastSeenAt = SystemClock.elapsedRealtime()
-
-    var x: Float
-    var y: Float
-    var w: Float
-    if (r.players.size >= 2) {
-      val xs = r.players.map { it.cx }.sorted()
-      val ys = r.players.map { it.cy }.sorted()
-      val median = xs[xs.size / 2]
-      // Ancho donde está "casi todo el juego" (sin el 10% de cada punta, por ejemplo el arquero lejos).
-      val lo = xs[(xs.size * 0.1f).toInt()]
-      val hi = xs[((xs.size - 1) * 0.9f).toInt().coerceAtLeast(0)]
-      x = median
-      y = ys[ys.size / 2]
-      w = (hi - lo) + 0.30f
-      r.ball?.let { b ->
-        // La pelota pesa mucho, pero sin dejar afuera a los jugadores.
-        x = 0.55f * b.cx + 0.45f * median
-        y = 0.5f * b.cy + 0.5f * y
-      }
-    } else {
-      val b = r.ball!!
-      x = b.cx; y = b.cy; w = 0.6f
-    }
+    lastSeenAt = now
     targetX = x.coerceIn(0f, 1f)
     targetY = y.coerceIn(0f, 1f)
     targetW = w.coerceIn(1f / MAX_ZOOM, 1f)
@@ -131,6 +188,22 @@ class AutoFramer {
     }
   }
 
+  /**
+   * Entre las posibles pelotas, se queda con una creíble: muy segura, o cerca de donde iba la pelota,
+   * o cerca de algún jugador. Así no confunde una cabeza o una luz con la pelota.
+   */
+  private fun pickBall(r: AutoTracker.Result, now: Long): AutoTracker.Box? {
+    val age = now - ballAt
+    val predT = (age / 1000f).coerceAtMost(0.5f)
+    val ex = ballX + ballVx * predT
+    val ey = ballY + ballVy * predT
+    return r.balls.firstOrNull { b ->
+      val nearPrediction = ballAt > 0 && age < BALL_MEMORY_MS && abs(b.cx - ex) < 0.18f && abs(b.cy - ey) < 0.18f
+      val nearPlayer = r.players.any { p -> abs(p.cx - b.cx) < 0.12f && abs(p.bottom - b.cy) < 0.12f }
+      b.score >= 0.5f || nearPrediction || (nearPlayer && b.score >= 0.25f)
+    }
+  }
+
   /** Llamar ~30 veces por segundo: acerca el encuadre al objetivo, de a poco. */
   fun tick() {
     val tx = if (enabled && !showFullFrame) targetX else 0.5f
@@ -140,7 +213,8 @@ class AutoFramer {
       // Volver rápido a la imagen completa.
       curX += (tx - curX) * 0.25f; curY += (ty - curY) * 0.25f; curW += (tw - curW) * 0.25f
     } else {
-      if (abs(tx - curX) > PAN_DEADZONE * curW) curX += (tx - curX) * PAN_EASE
+      val ease = if (mode == Mode.BALL && ballSeen) PAN_EASE * 1.6f else PAN_EASE
+      if (abs(tx - curX) > PAN_DEADZONE * curW) curX += (tx - curX) * ease
       if (abs(ty - curY) > PAN_DEADZONE * curW) curY += (ty - curY) * PAN_EASE * 0.6f
       if (abs(tw - curW) > ZOOM_DEADZONE) curW += (tw - curW) * ZOOM_EASE
     }

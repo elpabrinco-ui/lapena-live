@@ -25,7 +25,7 @@ import kotlin.math.min
 class AutoTracker(
   context: Context,
   /** Cuántas veces por segundo analiza la imagen. Más = sigue mejor, pero calienta más. */
-  private val analysesPerSecond: Float = 4f,
+  private val analysesPerSecond: Float = 5f,
   private val onResult: (Result) -> Unit,
 ) : Camera2ApiManager.ImageCallback {
 
@@ -38,8 +38,13 @@ class AutoTracker(
     private const val ANALYSIS_W = 640
     private const val ANALYSIS_H = 360
 
+    // Recorte "lupa": un cuadrado a resolución completa alrededor de donde debería estar la pelota.
+    // Ahí la pelota se ve más grande y la IA la encuentra mucho mejor.
+    private const val FOCUS = 320
+
     private const val MIN_PERSON_SCORE = 0.30f
-    private const val MIN_BALL_SCORE = 0.35f
+    private const val MIN_BALL_SCORE = 0.30f
+    private const val MIN_BALL_SCORE_FOCUS = 0.20f
     // Una "persona" que ocupa más de la mitad del alto está pegada a la cámara (alguien que pasa).
     private const val MAX_PERSON_HEIGHT = 0.5f
   }
@@ -49,7 +54,10 @@ class AutoTracker(
     val bottom get() = cy + h / 2f
   }
 
-  data class Result(val players: List<Box>, val ball: Box?, val atMs: Long)
+  /** [balls]: posibles pelotas, de la más segura a la menos segura. */
+  data class Result(val players: List<Box>, val balls: List<Box>, val atMs: Long) {
+    val ball get() = balls.firstOrNull()
+  }
 
   /** Zona de la cancha (de 0 a 1). Lo que queda afuera (banco, público) no se tiene en cuenta. */
   @Volatile var zone: Zone = Zone.FULL
@@ -57,12 +65,17 @@ class AutoTracker(
   /** Grados que hay que girar la imagen de la cámara para que quede derecha (0 o 180 en horizontal). */
   @Volatile var rotationDegrees: Int = 0
 
+  /** Dónde mirar con la "lupa" (de 0 a 1, sobre el video): la pelota esperada o el centro del juego. */
+  @Volatile var focusX = 0.5f
+  @Volatile var focusY = 0.5f
+
   private val thread = HandlerThread("ai-tracker").apply { start() }
   private val worker = Handler(thread.looper)
   private val busy = AtomicBoolean(false)
   private var lastAnalysisAt = 0L
   private val intervalMs = (1000f / analysesPerSecond).toLong()
   private val pixels = IntArray(ANALYSIS_W * ANALYSIS_H)
+  private val focusPixels = IntArray(FOCUS * FOCUS)
   @Volatile private var detector: ObjectDetector? = null
   @Volatile var failed: String? = null
     private set
@@ -93,8 +106,24 @@ class AutoTracker(
     if (now - lastAnalysisAt < intervalMs || busy.get()) return
     lastAnalysisAt = now
     busy.set(true)
-    val bmp = try {
-      yuvToSmallBitmap(image)
+    val srcW = image.width
+    val srcH = image.height
+    val bmp: Bitmap
+    var focusBmp: Bitmap? = null
+    var focusRect: FloatArray? = null
+    try {
+      val outH = min(ANALYSIS_H, (ANALYSIS_W.toLong() * srcH / srcW).toInt()).coerceAtLeast(1)
+      bmp = convert(image, 0, 0, srcW, srcH, ANALYSIS_W, outH, pixels)
+      // Lupa: solo con el celular en horizontal (0° o 180°), que es como se transmite.
+      val rot = rotationDegrees
+      if ((rot == 0 || rot == 180) && srcW >= FOCUS && srcH >= FOCUS) {
+        val fx = if (rot == 180) 1f - focusX else focusX
+        val fy = if (rot == 180) 1f - focusY else focusY
+        val x0 = (fx * srcW - FOCUS / 2).toInt().coerceIn(0, srcW - FOCUS)
+        val y0 = (fy * srcH - FOCUS / 2).toInt().coerceIn(0, srcH - FOCUS)
+        focusBmp = convert(image, x0, y0, FOCUS, FOCUS, FOCUS, FOCUS, focusPixels)
+        focusRect = floatArrayOf(x0.toFloat() / srcW, y0.toFloat() / srcH, FOCUS.toFloat() / srcW, FOCUS.toFloat() / srcH)
+      }
     } catch (e: Throwable) {
       Log.w(TAG, "Cuadro inválido", e)
       busy.set(false)
@@ -102,11 +131,12 @@ class AutoTracker(
     }
     worker.post {
       try {
-        if (running) analyze(bmp, now)
+        if (running) analyze(bmp, focusBmp, focusRect, now)
       } catch (e: Throwable) {
         Log.w(TAG, "Falló el análisis", e)
       } finally {
         bmp.recycle()
+        focusBmp?.recycle()
         busy.set(false)
       }
     }
@@ -123,7 +153,7 @@ class AutoTracker(
 
   // ---------------------------------------------------------------------------
 
-  private fun analyze(bmp: Bitmap, atMs: Long) {
+  private fun analyze(bmp: Bitmap, focusBmp: Bitmap?, focusRect: FloatArray?, atMs: Long) {
     val det = detector ?: return
     val w = bmp.width
     val h = bmp.height
@@ -148,14 +178,35 @@ class AutoTracker(
       }
     }
 
+    // Lupa: solo buscamos la pelota (los jugadores ya salen en la imagen completa).
+    val focusBalls = ArrayList<Box>()
+    if (focusBmp != null && focusRect != null) {
+      val result = det.detect(BitmapImageBuilder(focusBmp).build())
+      val fw = focusBmp.width.toFloat()
+      val fh = focusBmp.height.toFloat()
+      for (d in result.detections()) {
+        val cat = d.categories().firstOrNull() ?: continue
+        if (cat.categoryName() != "sports ball" || cat.score() < MIN_BALL_SCORE_FOCUS) continue
+        val r = d.boundingBox()
+        focusBalls.add(rotate(Box(
+          cx = focusRect[0] + r.centerX() / fw * focusRect[2],
+          cy = focusRect[1] + r.centerY() / fh * focusRect[3],
+          w = r.width() / fw * focusRect[2],
+          h = r.height() / fh * focusRect[3],
+          score = cat.score(),
+        )))
+      }
+    }
+
     val z = zone
     val players = all.filter { (name, b) ->
       name == "person" && b.score >= MIN_PERSON_SCORE && b.h <= MAX_PERSON_HEIGHT &&
         z.contains(b.cx, min(b.bottom, 1f))
     }.map { it.second }
-    val ball = all.filter { (name, b) -> name == "sports ball" && b.score >= MIN_BALL_SCORE && z.contains(b.cx, b.cy) }
-      .maxByOrNull { it.second.score }?.second
-    onResult(Result(dedupe(players), ball, atMs))
+    val balls = (all.filter { (name, b) -> name == "sports ball" && b.score >= MIN_BALL_SCORE }.map { it.second } + focusBalls)
+      .filter { z.contains(it.cx, it.cy) && it.h < 0.15f }
+      .sortedByDescending { it.score }
+    onResult(Result(dedupe(players), balls, atMs))
   }
 
   /** Quita duplicados (el mismo jugador visto en las dos mitades). */
@@ -176,12 +227,13 @@ class AutoTracker(
     else -> b
   }
 
-  /** Pasa el cuadro YUV de la cámara a una imagen chica en color (rápido: toma un punto de cada tanto). */
-  private fun yuvToSmallBitmap(image: Image): Bitmap {
-    val srcW = image.width
-    val srcH = image.height
-    val outW = ANALYSIS_W
-    val outH = min(ANALYSIS_H, (ANALYSIS_W.toLong() * srcH / srcW).toInt()).coerceAtLeast(1)
+  /**
+   * Pasa una parte del cuadro YUV de la cámara (x0, y0, regionW × regionH, en píxeles) a una imagen
+   * en color de outW × outH. Rápido: toma un punto de cada tanto si hay que achicar.
+   */
+  private fun convert(
+    image: Image, x0: Int, y0: Int, regionW: Int, regionH: Int, outW: Int, outH: Int, out: IntArray,
+  ): Bitmap {
     val yPlane = image.planes[0]
     val uPlane = image.planes[1]
     val vPlane = image.planes[2]
@@ -197,11 +249,11 @@ class AutoTracker(
     val vLimit = vBuf.limit()
     var i = 0
     for (oy in 0 until outH) {
-      val sy = oy * srcH / outH
+      val sy = y0 + oy * regionH / outH
       val yRowStart = sy * yRow
       val uvRowStart = (sy / 2) * uvRow
       for (ox in 0 until outW) {
-        val sx = ox * srcW / outW
+        val sx = x0 + ox * regionW / outW
         val yi = yRowStart + sx * yPix
         val uvi = uvRowStart + (sx / 2) * uvPix
         val y = if (yi < yLimit) (yBuf.get(yi).toInt() and 0xFF) else 0
@@ -210,10 +262,10 @@ class AutoTracker(
         val r = (y + 1.402f * v).toInt().coerceIn(0, 255)
         val g = (y - 0.344f * u - 0.714f * v).toInt().coerceIn(0, 255)
         val b = (y + 1.772f * u).toInt().coerceIn(0, 255)
-        pixels[i++] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+        out[i++] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
       }
     }
-    return Bitmap.createBitmap(pixels, 0, outW, outW, outH, Bitmap.Config.ARGB_8888)
+    return Bitmap.createBitmap(out, 0, outW, outW, outH, Bitmap.Config.ARGB_8888)
   }
 }
 

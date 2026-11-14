@@ -78,6 +78,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     // Seguimiento automático
     private const val KEY_ZONE = "follow_zone"
     private const val KEY_MOTOR_INVERTED = "motor_inverted"
+    private const val KEY_FOLLOW_MODE = "follow_mode"
     private const val FRAMER_TICK_MS = 33L
   }
 
@@ -160,7 +161,11 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   private val framerTick = object : Runnable {
     override fun run() {
       framer.tick()
-      tracker?.rotationDegrees = cameraToScreenRotation()
+      tracker?.let {
+        it.rotationDegrees = cameraToScreenRotation()
+        it.focusX = framer.focusX
+        it.focusY = framer.focusY
+      }
       handler.postDelayed(this, FRAMER_TICK_MS)
     }
   }
@@ -890,6 +895,14 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
 
     motor = MotorLink(this) { updateFollowUi() }
     motor.inverted = prefs.getBoolean(KEY_MOTOR_INVERTED, false)
+    framer.mode = if (prefs.getString(KEY_FOLLOW_MODE, "ball") == "players") AutoFramer.Mode.PLAYERS else AutoFramer.Mode.BALL
+    // Tocar el estado cambia entre seguir la pelota o el grupo de jugadores.
+    tvFollow.setOnClickListener {
+      framer.mode = if (framer.mode == AutoFramer.Mode.BALL) AutoFramer.Mode.PLAYERS else AutoFramer.Mode.BALL
+      prefs.edit().putString(KEY_FOLLOW_MODE, if (framer.mode == AutoFramer.Mode.BALL) "ball" else "players").apply()
+      toast(if (framer.mode == AutoFramer.Mode.BALL) "Sigue la pelota ⚽" else "Sigue a los jugadores 👥")
+      updateFollowStatus()
+    }
 
     btnFollow.setOnClickListener { if (tracker == null) startFollow() else stopFollow() }
     btnFollow.setOnLongClickListener { editZone(); true }
@@ -979,9 +992,10 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
       tvFollow.visibility = View.GONE
       return
     }
-    val ball = if (framer.ballSeen) " · ⚽" else ""
+    val modeLabel = if (framer.mode == AutoFramer.Mode.BALL) "Modo ⚽" else "Modo 👥"
+    val ball = if (framer.ballSeen) " · ⚽✓" else ""
     val zoom = String.format(Locale.getDefault(), "%.1fx", framer.currentZoom())
-    tvFollow.text = "👥 ${framer.playersSeen}$ball · $zoom"
+    tvFollow.text = "$modeLabel · 👥 ${framer.playersSeen}$ball · $zoom"
     tvFollow.visibility = View.VISIBLE
   }
 

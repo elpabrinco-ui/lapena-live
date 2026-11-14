@@ -16,6 +16,7 @@ La IA (dentro del celular, sin internet) busca a los jugadores y la pelota unas 
 1. Poné el zoom en **0.5x** (pellizcando la imagen) para que entre toda la cancha.
 2. **Mantené apretado 🎯 SEGUIR** y arrastrá el dedo de una esquina de la cancha a la otra. Lo de afuera (banco, público) no se tiene en cuenta. Queda guardado.
 3. Tocá **🎯 SEGUIR**. Abajo del botón se ve cuántos jugadores encuentra (👥), si ve la pelota (⚽) y el zoom.
+4. **Tocá ese cartel** para cambiar de modo: **⚽ pelota** (sigue la pelota y, si la pierde, a los jugadores) o **👥 jugadores** (sigue al grupo, más tranquilo).
 
 Al prenderlo, la cámara se reinicia un instante. El zoom digital llega hasta 2x; con 1080p se ve más nítido.
 
