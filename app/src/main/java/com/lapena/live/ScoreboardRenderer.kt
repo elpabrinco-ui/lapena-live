@@ -432,7 +432,7 @@ class ScoreboardRenderer(context: Context) {
    * Últimos comentarios, uno debajo del otro (el más nuevo abajo).
    * Ancho fijo [CHAT_W] en px del video; el alto depende de los mensajes.
    */
-  fun renderChat(messages: List<YouTubeApi.ChatMessage>): Bitmap? {
+  fun renderChat(messages: List<YouTubeApi.ChatMessage>, maxLines: Int = 4): Bitmap? {
     if (messages.isEmpty()) return null
     val w = (CHAT_W * S).toInt()
     val pad = 10 * S
@@ -443,7 +443,7 @@ class ScoreboardRenderer(context: Context) {
       val author = TextUtils.ellipsize(m.author, chatAuthorPaint, textW.toFloat(), TextUtils.TruncateAt.END).toString()
       val body = android.text.StaticLayout.Builder
         .obtain(m.text, 0, m.text.length, chatTextPaint, textW)
-        .setMaxLines(2)
+        .setMaxLines(maxLines)
         .setEllipsize(TextUtils.TruncateAt.END)
         .build()
       author to body
