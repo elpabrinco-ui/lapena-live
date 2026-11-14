@@ -70,8 +70,9 @@ jobs:
         run: |
           TAG="prueba-${BRANCH//\//-}"
           gh release delete "$TAG" --yes --cleanup-tag || true
-          gh release create "$TAG" LaPenaLive.apk \
+          cp LaPenaLive.apk LaPenaLive-PRUEBA.apk
+          gh release create "$TAG" LaPenaLive-PRUEBA.apk \
             --target "$GITHUB_SHA" \
             --title "La Peña Live – PRUEBA ($BRANCH)" \
-            --notes "Versión de prueba de la rama $BRANCH (commit ${GITHUB_SHA::7}). No es la versión del equipo. [versionCode=${GITHUB_RUN_NUMBER}]" \
+            --notes "Versión de prueba de la rama $BRANCH (commit ${GITHUB_SHA::7}). Se instala como otra app (\"La Peña Live PRUEBA\"), no pisa la del equipo. [versionCode=${GITHUB_RUN_NUMBER}]" \
             --prerelease

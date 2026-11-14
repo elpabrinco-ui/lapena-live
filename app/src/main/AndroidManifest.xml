@@ -19,7 +19,7 @@
 
   <application
     android:allowBackup="false"
-    android:label="@string/app_name"
+    android:label="${appLabel}"
     android:icon="@drawable/crest"
     android:theme="@style/Theme.LaPenaLive">
 

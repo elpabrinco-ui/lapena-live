@@ -78,6 +78,8 @@ class StartActivity : AppCompatActivity() {
       pendingUpdate = false
       startUpdate(findViewById(R.id.btnUpdate))
     }
+    // La app de prueba no se actualiza sola a la versión del equipo (son apps distintas).
+    if (packageName.endsWith(".prueba")) return
     UpdateChecker.check(this) { latest ->
       runOnUiThread {
         val btnUpdate = findViewById<Button>(R.id.btnUpdate)

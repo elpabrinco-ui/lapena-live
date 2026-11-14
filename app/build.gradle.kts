@@ -16,6 +16,16 @@ android {
     val build = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
     versionCode = build
     versionName = "1.$build"
+
+    // Ramas de prueba: se instalan como OTRA app ("La Peña Live PRUEBA"), sin pisar la del equipo.
+    val branch = System.getenv("GITHUB_REF_NAME") ?: "main"
+    if (branch != "main") {
+      applicationIdSuffix = ".prueba"
+      versionNameSuffix = "-prueba"
+      manifestPlaceholders["appLabel"] = "La Peña Live PRUEBA"
+    } else {
+      manifestPlaceholders["appLabel"] = "La Peña Live"
+    }
   }
 
   signingConfigs {
