@@ -26,6 +26,9 @@ class ScoreboardRenderer(context: Context) {
     const val S = 2f // factor de nitidez
     const val CHAT_W = 400
     const val VIEWERS_H = 30
+    // Transparencia de la bienvenida (0 = invisible, 255 = sólido)
+    private const val WELCOME_BG_ALPHA = 175
+    private const val WELCOME_PITCH_ALPHA = 190
 
     private const val CREST_W = 64f
     private const val NAME_MIN_W = 100f
@@ -232,7 +235,8 @@ class ScoreboardRenderer(context: Context) {
   fun renderWelcome(state: MatchState, videoW: Int, videoH: Int, compact: Boolean = false): Bitmap {
     val bmp = Bitmap.createBitmap(videoW, videoH, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp)
-    c.drawColor(MAROON)
+    // Fondo bordó semitransparente: se ve lo que pasa en la cancha detrás.
+    c.drawColor(Color.argb(WELCOME_BG_ALPHA, Color.red(MAROON), Color.green(MAROON), Color.blue(MAROON)))
     val W = videoW.toFloat()
     val H = videoH.toFloat()
 
@@ -299,7 +303,10 @@ class ScoreboardRenderer(context: Context) {
     val pitch = RectF(W * 0.52f, H * 0.06f, W * 0.96f, H * 0.94f)
     val outfieldCount = (state.starters.size - 1).coerceAtLeast(0)
     val futsal = outfieldCount == 4
+    // La cancha también deja ver un poco el video; jugadores y textos quedan sólidos.
+    c.saveLayerAlpha(pitch, WELCOME_PITCH_ALPHA)
     if (futsal) drawParquet(c, pitch, H) else drawGrass(c, pitch)
+    c.restore()
     val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = Color.parseColor("#EEFFFFFF")
       style = Paint.Style.STROKE
