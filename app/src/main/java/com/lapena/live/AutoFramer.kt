@@ -31,6 +31,12 @@ class AutoFramer {
     private const val LOST_AFTER_MS = 2500L
     // Cuánto tiempo "recuerda" la pelota después de dejar de verla.
     private const val BALL_MEMORY_MS = 1200L
+    // "Tumulto": la pelota desaparece entre varios jugadores juntos. La cámara se queda en ese grupo,
+    // abre un poco el plano y espera a que la pelota salga.
+    private const val CROWD_MIN_PLAYERS = 3
+    private const val CROWD_RADIUS_X = 0.14f
+    private const val CROWD_RADIUS_Y = 0.22f
+    private const val HOLD_MAX_MS = 6000L
 
     // Motor: zona muerta alrededor del centro y velocidad máxima (pasos por segundo del firmware).
     private const val MOTOR_DEADZONE = 0.10f
@@ -78,6 +84,7 @@ class AutoFramer {
     if (!on) {
       targetX = 0.5f; targetY = 0.5f; targetW = 1f
       ballAt = 0L; ballVx = 0f; ballVy = 0f
+      holding = false
       motorSpeed = 0
       playersSeen = 0
       ballSeen = false
@@ -96,6 +103,14 @@ class AutoFramer {
   private var ballVx = 0f
   private var ballVy = 0f
   private var ballAt = 0L
+
+  // Espera en un tumulto: punto que se mira (los pies del grupo) y desde cuándo.
+  private var holdX = 0.5f
+  private var holdY = 0.5f
+  private var holdSince = 0L
+  /** true mientras espera a que la pelota salga de un grupo de jugadores. */
+  @Volatile var holding = false
+    private set
 
   /** Dónde debería mirar la "lupa" de la IA en el próximo análisis. */
   @Volatile var focusX = 0.5f
@@ -137,8 +152,33 @@ class AutoFramer {
         ballVx = 0f; ballVy = 0f
       }
       ballX = ball.cx; ballY = ball.cy; ballAt = now
+      holding = false
     }
-    val ballAge = now - ballAt
+    var ballAge = now - ballAt
+
+    // --- Tumulto: la pelota se perdió entre varios jugadores juntos ---
+    if (mode != Mode.BALL) holding = false
+    if (mode == Mode.BALL && ball == null && !holding && ballAt > 0 && ballAge < BALL_MEMORY_MS &&
+      crowdAt(r, ballX, ballY).size >= CROWD_MIN_PLAYERS
+    ) {
+      holding = true
+      holdX = ballX; holdY = ballY; holdSince = now
+      ballVx = 0f; ballVy = 0f  // ahí adentro no sigue en línea recta: no "imaginar" que se va
+    }
+    var crowd: List<AutoTracker.Box> = emptyList()
+    if (holding) {
+      crowd = crowdAt(r, holdX, holdY)
+      if (crowd.size < 2 || now - holdSince > HOLD_MAX_MS) {
+        // El grupo se abrió o pasó mucho tiempo: volver a seguir a los jugadores.
+        holding = false
+        ballAt = 0L
+        ballAge = now
+      } else {
+        // El grupo se mueve despacio: lo acompañamos.
+        holdX += (crowd.map { it.cx }.average().toFloat() - holdX) * 0.5f
+        holdY += (crowd.map { it.bottom }.average().toFloat() - holdY) * 0.5f
+      }
+    }
     // Si la dejó de ver hace poco, la "imagina" donde debería estar (sigue su recorrido un ratito).
     val ballRecent = ballAt > 0 && ballAge < BALL_MEMORY_MS
     val predT = (ballAge / 1000f).coerceAtMost(0.5f)
@@ -149,7 +189,14 @@ class AutoFramer {
     var x: Float
     var y: Float
     var w: Float
-    if (mode == Mode.BALL && ballRecent) {
+    if (holding) {
+      x = holdX; y = holdY
+      val extent = crowd.maxOf { it.cx } - crowd.minOf { it.cx }
+      // Un poco más abierto que el grupo, y se sigue abriendo de a poco mientras espera.
+      val waited = ((now - holdSince) / HOLD_MAX_MS.toFloat()).coerceIn(0f, 1f)
+      w = maxOf(0.62f, extent + 0.38f) + waited * 0.15f
+      focusX = holdX; focusY = holdY
+    } else if (mode == Mode.BALL && ballRecent) {
       // La pelota manda. Los jugadores tiran un poco para que se vea la jugada, no solo la pelota.
       val pull = if (px.isNaN()) 0f else 0.2f
       x = bx * (1 - pull) + (if (px.isNaN()) 0f else px * pull)
@@ -188,6 +235,10 @@ class AutoFramer {
     }
   }
 
+  /** Jugadores con los pies cerca de un punto. */
+  private fun crowdAt(r: AutoTracker.Result, x: Float, y: Float) =
+    r.players.filter { abs(it.cx - x) < CROWD_RADIUS_X && abs(it.bottom - y) < CROWD_RADIUS_Y }
+
   /**
    * Entre las posibles pelotas, se queda con una creíble: muy segura, o cerca de donde iba la pelota,
    * o cerca de algún jugador. Así no confunde una cabeza o una luz con la pelota.
@@ -198,7 +249,8 @@ class AutoFramer {
     val ex = ballX + ballVx * predT
     val ey = ballY + ballVy * predT
     return r.balls.firstOrNull { b ->
-      val nearPrediction = ballAt > 0 && age < BALL_MEMORY_MS && abs(b.cx - ex) < 0.18f && abs(b.cy - ey) < 0.18f
+      val nearHold = holding && abs(b.cx - holdX) < 0.30f && abs(b.cy - holdY) < 0.30f
+      val nearPrediction = nearHold || ballAt > 0 && age < BALL_MEMORY_MS && abs(b.cx - ex) < 0.18f && abs(b.cy - ey) < 0.18f
       val nearPlayer = r.players.any { p -> abs(p.cx - b.cx) < 0.12f && abs(p.bottom - b.cy) < 0.12f }
       b.score >= 0.5f || nearPrediction || (nearPlayer && b.score >= 0.25f)
     }

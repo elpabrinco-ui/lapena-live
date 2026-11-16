@@ -993,7 +993,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
       return
     }
     val modeLabel = if (framer.mode == AutoFramer.Mode.BALL) "Modo ⚽" else "Modo 👥"
-    val ball = if (framer.ballSeen) " · ⚽✓" else ""
+    val ball = if (framer.ballSeen) " · ⚽✓" else if (framer.holding) " · 🔎" else ""
     val zoom = String.format(Locale.getDefault(), "%.1fx", framer.currentZoom())
     tvFollow.text = "$modeLabel · 👥 ${framer.playersSeen}$ball · $zoom"
     tvFollow.visibility = View.VISIBLE
