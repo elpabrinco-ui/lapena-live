@@ -62,6 +62,10 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
 
     private const val END_CARD_SECONDS = 30
 
+    // Cartel de gol: cuánto se ve, y cuánto antes del "+" se pone la marca del capítulo
+    private const val GOAL_BANNER_MS = 6_000L
+    private const val GOAL_REWIND_MS = 12_000L
+
     // Chat: cada cuánto consultar (cuida el cupo diario de la API) y cuánto tiempo se ve cada mensaje
     private const val CHAT_POLL_MIN_MS = 8000L
     // Cada comentario se ve 25 s, más tiempo si es largo (hasta 45 s).
@@ -102,6 +106,20 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   private var chatFilter: ImageObjectFilterRender? = null
   private var welcomeFilter: ImageObjectFilterRender? = null
   private var viewersFilter: ImageObjectFilterRender? = null
+
+  // Cartel de gol
+  private var goalFilter: ImageObjectFilterRender? = null
+  private var lastGoalSeq = -1
+  private var goalBannerUntil = 0L
+  private var lastGoalKey = ""
+
+  // Momentos para los capítulos de YouTube
+  private data class Moment(var atMs: Long, val kind: String, val text: String,
+                            val goalSeq: Int = -1, var scorer: String = "", val team: Int = 0)
+  private val moments = ArrayList<Moment>()
+  private var liveStartAt = 0L          // cuándo empezó a llegar video a YouTube
+  private var finalAtMs = -1L
+  private val periodsStarted = HashSet<Int>()
   private var lastViewersKey = ""
   @Volatile private var viewerCount: Int? = null
   @Volatile private var viewersRunning = false
@@ -131,6 +149,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
       redrawChat(force = false)
       redrawWelcome(force = false)
       redrawViewers(force = false)
+      redrawGoal(force = false)
       handler.postDelayed(this, 250)
     }
   }
@@ -320,7 +339,10 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
         // Ignora mensajes viejos (por ejemplo, al reconectar)
         if (current == null || newState.sentAt >= current.sentAt) {
           matchState = newState
-          handler.post { redrawBoard(force = true) }
+          handler.post {
+            trackMoments(current, newState)
+            redrawBoard(force = true)
+          }
         }
       },
       onConnection = { online ->
@@ -351,8 +373,10 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     val welcome = ImageObjectFilterRender().also { it.alpha = 0f; welcomeFilter = it }
     // El chat va encima de la bienvenida para que se vea también en la previa.
     val viewers = ImageObjectFilterRender().also { it.alpha = 0f; viewersFilter = it }
+    val goal = ImageObjectFilterRender().also { it.alpha = 0f; goalFilter = it }
     gl.addFilter(board)
     gl.addFilter(viewers)
+    gl.addFilter(goal)
     gl.addFilter(welcome)
     gl.addFilter(chat)
     endCardBitmap?.let { bmp ->
@@ -364,6 +388,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     redrawChat(force = true)
     redrawWelcome(force = true)
     redrawViewers(force = true)
+    redrawGoal(force = true)
   }
 
   /** Pantalla de bienvenida con la formación: se muestra/oculta desde el celular de control. */
@@ -430,6 +455,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   // ---------------- Pantalla de cierre ----------------
 
   private fun startEndCard() {
+    if (liveStartAt > 0) finalAtMs = System.currentTimeMillis() - liveStartAt
     exitSaver()
     val bmp = renderer.renderEndCard(matchState, quality.w, quality.h)
     endCardBitmap = bmp
@@ -640,6 +666,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   }
 
   private var finishing = false
+  @Volatile private var chaptersMsg: String? = null
 
   /**
    * Termina desde la pantalla final: primero finaliza el vivo en YouTube
@@ -648,6 +675,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   private fun finishEndCard() {
     if (finishing) return
     finishing = true
+    chaptersMsg = null
     handler.removeCallbacks(endCardTick)
     val sel = selection
     if (sel == null) {
@@ -668,6 +696,12 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
           "Falta volver a conectar la cuenta de YouTube."
         } else {
           YouTubeApi.complete(token, sel.broadcastId)
+          // Capítulos: si falla, no impide terminar
+          val chapters = buildChapters()
+          if (chapters != null) {
+            try { YouTubeApi.setChapters(token, sel.broadcastId, chapters); chaptersMsg = "Capítulos agregados al video ✓" }
+            catch (e: Exception) { chaptersMsg = "No se pudieron agregar los capítulos: ${e.message}" }
+          }
           null
         }
       } catch (e: YouTubeException) {
@@ -684,7 +718,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
           if (error == null) {
             Selection.clear(this)
             loadSelection()
-            toast("Vivo finalizado en YouTube ✓")
+            toast("Vivo finalizado en YouTube ✓" + (chaptersMsg?.let { "\n$it" } ?: ""))
           } else {
             showInfo("No se pudo finalizar en YouTube",
               "$error\n\nEntrá a YouTube Studio y tocá \"Finalizar transmisión\".")
@@ -798,6 +832,126 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     filter.alpha = 1f
   }
 
+  // ---------------- Goles y momentos ----------------
+
+  private fun teamName(state: MatchState, team: Int) = (if (team == 1) state.home else state.away).uppercase()
+
+  /** Compara el estado nuevo con el anterior y anota momentos (solo durante el vivo). */
+  private fun trackMoments(old: MatchState?, new: MatchState) {
+    val first = lastGoalSeq < 0
+    if (first) {
+      // Primer estado recibido: no mostrar un gol viejo
+      lastGoalSeq = new.goalSeq
+      return
+    }
+    val live = stream.isStreaming && liveStartAt > 0
+    val now = System.currentTimeMillis()
+    val at = now - liveStartAt
+
+    // Gol nuevo
+    if (new.goalSeq > lastGoalSeq && new.goalTeam in 1..2) {
+      lastGoalSeq = new.goalSeq
+      goalBannerUntil = now + GOAL_BANNER_MS
+      if (live) moments.add(Moment(at, "goal", "", new.goalSeq, new.goalScorer, new.goalTeam).also {
+        it.atMs = (at - GOAL_REWIND_MS).coerceAtLeast(0)
+      })
+      redrawGoal(force = true)
+    } else if (new.goalSeq == lastGoalSeq) {
+      // Llegó el nombre del goleador del último gol
+      moments.lastOrNull { it.goalSeq == new.goalSeq }?.scorer = new.goalScorer
+      redrawGoal(force = true)
+    }
+    lastGoalSeq = maxOf(lastGoalSeq, new.goalSeq)
+
+    if (old != null && live) {
+      // Gol corregido con "−": se borra el último gol de ese equipo
+      if (new.homeGoals < old.homeGoals) moments.indexOfLast { it.kind == "goal" && it.team == 1 }.takeIf { it >= 0 }?.let { moments.removeAt(it) }
+      if (new.awayGoals < old.awayGoals) moments.indexOfLast { it.kind == "goal" && it.team == 2 }.takeIf { it >= 0 }?.let { moments.removeAt(it) }
+      // Arranque de cada tiempo (primera vez que corre el reloj en ese tiempo)
+      if (new.running && !old.running && new.period !in periodsStarted) {
+        periodsStarted.add(new.period)
+        moments.add(Moment(at, "period", "Arranca el ${new.period}T"))
+      }
+    }
+  }
+
+  private fun goalBannerText(state: MatchState): String {
+    val ours = teamName(state, state.goalTeam).contains("PEÑA")
+    return when {
+      ours && state.goalScorer == "EN CONTRA" -> "⚽ GOL · EN CONTRA"
+      ours && state.goalScorer.isNotBlank() -> "⚽ GOL · ${state.goalScorer}"
+      else -> "⚽ GOL · ${teamName(state, state.goalTeam)}"
+    }
+  }
+
+  private fun redrawGoal(force: Boolean) {
+    val filter = goalFilter ?: return
+    val state = matchState
+    val show = state != null && state.visible && !welcomeShowing(state) &&
+      state.goalTeam in 1..2 && System.currentTimeMillis() < goalBannerUntil
+    val key = if (show) goalBannerText(state!!) else "off"
+    if (!force && key == lastGoalKey) return
+    lastGoalKey = key
+    if (!show) {
+      filter.alpha = 0f
+      return
+    }
+    val bmp = renderer.renderGoal(key)
+    filter.setImage(bmp)
+    filter.setScale(bmp.width / ScoreboardRenderer.S * 100f / WIDTH, ScoreboardRenderer.GOAL_H * 100f / HEIGHT)
+    filter.setPosition(BOARD_X, BOARD_Y + ScoreboardRenderer.HEIGHT * 100f / HEIGHT + 1.2f)
+    filter.alpha = 1f
+  }
+
+  private fun resetMoments() {
+    moments.clear()
+    periodsStarted.clear()
+    liveStartAt = 0L
+    finalAtMs = -1L
+  }
+
+  /**
+   * Arma los capítulos para la descripción. Reglas de YouTube: empieza en 0:00,
+   * al menos 3, en orden, y cada uno de 10 segundos o más.
+   */
+  private fun buildChapters(): String? {
+    val state = matchState ?: return null
+    val list = ArrayList<Pair<Long, String>>()
+    list.add(0L to "Previa")
+    var home = 0; var away = 0
+    for (m in moments.sortedBy { it.atMs }) {
+      when (m.kind) {
+        "period" -> list.add(m.atMs to m.text)
+        "goal" -> {
+          if (m.team == 1) home++ else away++
+          val who = when {
+            m.scorer == "EN CONTRA" -> " · en contra"
+            m.scorer.isNotBlank() && teamName(state, m.team).contains("PEÑA") -> " · ${m.scorer}"
+            else -> ""
+          }
+          list.add(m.atMs to "⚽ Gol de ${teamName(state, m.team)} ($home-$away)$who")
+        }
+      }
+    }
+    if (finalAtMs > 0) list.add(finalAtMs to "Final")
+    // Orden y separación mínima de 10 s
+    list.sortBy { it.first }
+    val fixed = ArrayList<Pair<Long, String>>()
+    for ((t, txt) in list) {
+      val prev = fixed.lastOrNull()?.first
+      fixed.add((if (prev != null && t < prev + 10_000) prev + 10_000 else t) to txt)
+    }
+    if (fixed.size < 3) return null
+    val long = fixed.last().first >= 3_600_000
+    return fixed.joinToString("\n") { (t, txt) -> "${formatChapterTime(t, long)} $txt" }
+  }
+
+  private fun formatChapterTime(ms: Long, long: Boolean): String {
+    val s = ms / 1000
+    return if (long) String.format(Locale.US, "%d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60)
+    else String.format(Locale.US, "%02d:%02d", s / 60, s % 60)
+  }
+
   // ---------------- Espectadores ----------------
 
   /** Consulta cada 30 s cuánta gente mira (1 unidad de cupo por consulta). */
@@ -823,7 +977,8 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     val filter = viewersFilter ?: return
     val state = matchState
     val count = viewerCount
-    val show = state != null && state.viewers && state.visible && !welcomeShowing(state) && count != null
+    val show = state != null && state.viewers && state.visible && !welcomeShowing(state) &&
+      count != null && System.currentTimeMillis() >= goalBannerUntil
     val key = if (show) "v$count" else "off"
     if (!force && key == lastViewersKey) return
     lastViewersKey = key
@@ -938,6 +1093,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
 
   private fun stopStreaming(message: String) {
     runOnUiThread {
+      if (message != "Transmisión detenida" || finishing) resetMoments()
       exitSaver()
       removeEndCard()
       stopChat()
@@ -964,7 +1120,11 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   }
 
   override fun onConnectionSuccess() {
-    runOnUiThread { if (endCardFilter == null) tvStatus.text = "● EN VIVO" }
+    runOnUiThread {
+      if (endCardFilter == null) tvStatus.text = "● EN VIVO"
+      // El video de YouTube empieza con la primera conexión (las reconexiones no reinician el reloj)
+      if (liveStartAt == 0L) liveStartAt = System.currentTimeMillis()
+    }
   }
 
   override fun onConnectionFailed(reason: String) {

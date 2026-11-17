@@ -195,6 +195,31 @@ object YouTubeApi {
     call(token, "POST", "liveBroadcasts/transition?broadcastStatus=complete&id=${enc(broadcastId)}&part=status")
   }
 
+  private const val CHAPTERS_HEADER = "▶ Momentos del partido"
+
+  /**
+   * Agrega (o reemplaza) los capítulos al final de la descripción del video.
+   * YouTube exige mandar título y categoría al actualizar, así que se leen primero.
+   * Cuesta 51 unidades de cupo (1 lectura + 1 actualización).
+   */
+  fun setChapters(token: String, videoId: String, chapters: String) {
+    val item = items(call(token, "GET", "videos?part=snippet&id=${enc(videoId)}")).firstOrNull()
+      ?: throw YouTubeException("No se encontró el video")
+    val snippet = item.getJSONObject("snippet")
+    val oldDesc = snippet.optString("description")
+    // Si ya había capítulos de la app, se reemplazan
+    val base = oldDesc.substringBefore(CHAPTERS_HEADER).trimEnd()
+    val newDesc = (if (base.isEmpty()) "" else base + "\n\n") + CHAPTERS_HEADER + "\n" + chapters
+    val newSnippet = JSONObject()
+      .put("title", snippet.optString("title"))
+      .put("categoryId", snippet.optString("categoryId", "17"))
+      .put("description", newDesc.take(4900))
+    snippet.optJSONArray("tags")?.let { newSnippet.put("tags", it) }
+    snippet.optString("defaultLanguage").takeIf { it.isNotEmpty() }?.let { newSnippet.put("defaultLanguage", it) }
+    snippet.optString("defaultAudioLanguage").takeIf { it.isNotEmpty() }?.let { newSnippet.put("defaultAudioLanguage", it) }
+    call(token, "PUT", "videos?part=snippet", JSONObject().put("id", videoId).put("snippet", newSnippet))
+  }
+
   /** Espectadores en vivo ahora (null si YouTube no lo informa todavía). Cuesta 1 unidad. */
   fun concurrentViewers(token: String, broadcastId: String): Int? =
     items(call(token, "GET", "videos?part=liveStreamingDetails&id=${enc(broadcastId)}"))

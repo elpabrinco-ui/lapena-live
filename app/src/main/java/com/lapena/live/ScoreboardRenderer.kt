@@ -26,6 +26,7 @@ class ScoreboardRenderer(context: Context) {
     const val S = 2f // factor de nitidez
     const val CHAT_W = 400
     const val VIEWERS_H = 30
+    const val GOAL_H = 44
     // Transparencia de la bienvenida (0 = invisible, 255 = sólido)
     private const val WELCOME_BG_ALPHA = 175
     private const val WELCOME_PITCH_ALPHA = 190
@@ -201,6 +202,29 @@ class ScoreboardRenderer(context: Context) {
     return bmp
   }
 
+  // ---------------- Gol ----------------
+
+  /** Cartel "⚽ GOL · 11 EROS" (alto 44 px del video), debajo del marcador. */
+  fun renderGoal(text: String): Bitmap {
+    val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.WHITE
+      typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+      textSize = 24 * S
+    }
+    val h = (GOAL_H * S).toInt()
+    val padX = 18 * S
+    val w = (p.measureText(text) + padX * 2 + 6 * S).toInt()
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    fill.color = MAROON
+    c.drawRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), 10 * S, 10 * S, fill)
+    fill.color = Color.WHITE
+    c.drawRect(RectF(0f, 8 * S, 6 * S, h - 8 * S), fill)   // barrita blanca
+    val b = Rect(); p.getTextBounds("0A", 0, 2, b)
+    c.drawText(text, padX + 6 * S, h / 2f - b.exactCenterY(), p)
+    return bmp
+  }
+
   // ---------------- Espectadores ----------------
 
   /** Cartelito "● 23 viendo" (alto 30 px del video). */
@@ -289,7 +313,7 @@ class ScoreboardRenderer(context: Context) {
       }
       // Espacios "duros" (\u00A0) dentro de cada jugador: "19 Pablito" nunca se parte en dos líneas.
       val text = state.subs.joinToString("  ·  ") {
-        listOf(it.number, it.name).filter { s -> s.isNotEmpty() }.joinToString("\u00A0").replace(' ', '\u00A0')
+        listOf(it.number, it.name.uppercase()).filter { s -> s.isNotEmpty() }.joinToString("\u00A0").replace(' ', '\u00A0')
       }
       val layout = android.text.StaticLayout.Builder.obtain(text, 0, text.length, subsPaint, colW.toInt())
         .setAlignment(android.text.Layout.Alignment.ALIGN_CENTER)
@@ -369,7 +393,7 @@ class ScoreboardRenderer(context: Context) {
       c.drawCircle(x, y, r, Paint(line).apply { color = Color.WHITE })
       if (p.number.isNotEmpty()) drawCentered(c, p.number, x, y, numPaint)
       if (p.name.isNotEmpty()) {
-        val n = TextUtils.ellipsize(p.name, namePaintP, maxNameW, TextUtils.TruncateAt.END).toString()
+        val n = TextUtils.ellipsize(p.name.uppercase(), namePaintP, maxNameW, TextUtils.TruncateAt.END).toString()
         val tw = namePaintP.measureText(n) + H * 0.02f
         val ny = y + r + H * 0.032f
         c.drawRoundRect(RectF(x - tw / 2, ny - H * 0.024f, x + tw / 2, ny + H * 0.024f), H * 0.012f, H * 0.012f, nameBg)

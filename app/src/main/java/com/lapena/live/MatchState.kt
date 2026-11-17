@@ -27,6 +27,10 @@ data class MatchState(
   val formation: String = "2-3-1",  // líneas de campo, de defensa a ataque
   val starters: List<Player> = emptyList(), // [0] = arquero, después por líneas
   val subs: List<Player> = emptyList(),
+  // Último gol: número de gol (sube con cada "+"), equipo (1 local, 2 visita) y goleador
+  val goalSeq: Int = 0,
+  val goalTeam: Int = 0,
+  val goalScorer: String = "",
 ) {
   /** Tiempo del reloj ahora, usando la hora del celular (ambos celulares usan hora de red). */
   fun clockNow(now: Long = System.currentTimeMillis()): Long {
@@ -55,6 +59,7 @@ data class MatchState(
     put("fm", formation)
     put("st", playersToJson(starters))
     put("sb", playersToJson(subs))
+    put("gs", goalSeq); put("gt", goalTeam); put("gsc", goalScorer)
   }.toString()
 
   companion object {
@@ -77,6 +82,9 @@ data class MatchState(
         formation = o.optString("fm", "2-3-1"),
         starters = playersFromJson(o.optJSONArray("st")),
         subs = playersFromJson(o.optJSONArray("sb")),
+        goalSeq = o.optInt("gs"),
+        goalTeam = o.optInt("gt"),
+        goalScorer = o.optString("gsc"),
       )
     } catch (e: Exception) {
       null

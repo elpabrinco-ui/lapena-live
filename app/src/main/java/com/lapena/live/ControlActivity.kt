@@ -109,9 +109,9 @@ class ControlActivity : AppCompatActivity() {
     etHome.addTextChangedListener(namesWatcher)
     etAway.addTextChangedListener(namesWatcher)
 
-    findViewById<Button>(R.id.btnHomePlus).setOnClickListener { change { copy(homeGoals = homeGoals + 1) } }
+    findViewById<Button>(R.id.btnHomePlus).setOnClickListener { goal(1) }
     findViewById<Button>(R.id.btnHomeMinus).setOnClickListener { change { copy(homeGoals = (homeGoals - 1).coerceAtLeast(0)) } }
-    findViewById<Button>(R.id.btnAwayPlus).setOnClickListener { change { copy(awayGoals = awayGoals + 1) } }
+    findViewById<Button>(R.id.btnAwayPlus).setOnClickListener { goal(2) }
     findViewById<Button>(R.id.btnAwayMinus).setOnClickListener { change { copy(awayGoals = (awayGoals - 1).coerceAtLeast(0)) } }
 
     btnStartPause.setOnClickListener {
@@ -170,6 +170,50 @@ class ControlActivity : AppCompatActivity() {
   override fun onPause() {
     super.onPause()
     handler.removeCallbacks(tick)
+  }
+
+  // ---------------- Goles ----------------
+
+  /** Equipo de La Peña en el marcador (1 local, 2 visita). */
+  private fun ourTeam(): Int = when {
+    state.home.uppercase().contains("PEÑA") -> 1
+    state.away.uppercase().contains("PEÑA") -> 2
+    else -> 1
+  }
+
+  private fun goal(team: Int) {
+    change {
+      if (team == 1) copy(homeGoals = homeGoals + 1, goalSeq = goalSeq + 1, goalTeam = 1, goalScorer = "")
+      else copy(awayGoals = awayGoals + 1, goalSeq = goalSeq + 1, goalTeam = 2, goalScorer = "")
+    }
+    if (team == ourTeam()) askScorer()
+  }
+
+  /** "¿Quién hizo el gol?": titulares y suplentes del partido (o el plantel si no hay formación). */
+  private fun askScorer() {
+    val seq = state.goalSeq
+    val fromLineup = (state.starters + state.subs).filter { it.name.isNotBlank() }
+    val players = fromLineup.ifEmpty {
+      val saved = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("roster", null)
+      saved?.lines()?.filter { it.isNotBlank() }?.map { line ->
+        val parts = line.trim().split(Regex("\\s+"), limit = 2)
+        if (parts.size == 2 && parts[0].all { it.isDigit() }) Player(parts[0], parts[1]) else Player("", line.trim())
+      } ?: LineupActivity.OFFICIAL_ROSTER
+    }
+    val labels = players.map { "${it.number} ${it.name}".trim().uppercase() } + listOf("EN CONTRA", "SIN NOMBRE")
+    AlertDialog.Builder(this)
+      .setTitle("⚽ ¿Quién hizo el gol?")
+      .setItems(labels.toTypedArray()) { _, i ->
+        val scorer = when {
+          i < players.size -> labels[i]
+          i == players.size -> "EN CONTRA"
+          else -> ""
+        }
+        // Solo si no hubo otro gol mientras se elegía
+        if (state.goalSeq == seq && scorer.isNotEmpty()) change { copy(goalScorer = scorer) }
+      }
+      .setNegativeButton("Saltar", null)
+      .show()
   }
 
   private fun setPeriod(p: Int) {
