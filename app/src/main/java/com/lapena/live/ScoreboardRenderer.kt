@@ -287,7 +287,10 @@ class ScoreboardRenderer(context: Context) {
         textSize = H * 0.032f
         typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
       }
-      val text = state.subs.joinToString("  ·  ") { listOf(it.number, it.name).filter { s -> s.isNotEmpty() }.joinToString(" ") }
+      // Espacios "duros" (\u00A0) dentro de cada jugador: "19 Pablito" nunca se parte en dos líneas.
+      val text = state.subs.joinToString("  ·  ") {
+        listOf(it.number, it.name).filter { s -> s.isNotEmpty() }.joinToString("\u00A0").replace(' ', '\u00A0')
+      }
       val layout = android.text.StaticLayout.Builder.obtain(text, 0, text.length, subsPaint, colW.toInt())
         .setAlignment(android.text.Layout.Alignment.ALIGN_CENTER)
         .setMaxLines(if (compact) 2 else 3)

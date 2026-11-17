@@ -367,6 +367,8 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   }
 
   /** Pantalla de bienvenida con la formación: se muestra/oculta desde el celular de control. */
+  private fun welcomeShowing(state: MatchState) = state.welcome && state.starters.isNotEmpty()
+
   /** Micrófono silenciado mientras se ve la bienvenida (la pantalla final maneja el suyo). */
   private fun setWelcomeMute(mute: Boolean) {
     if (mute == welcomeMuted) return
@@ -400,7 +402,8 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   private fun redrawBoard(force: Boolean) {
     val filter = boardFilter ?: return
     val state = matchState
-    if (state == null || !state.visible) {
+    // Con la bienvenida en pantalla el marcador se oculta (se veía a través de la transparencia).
+    if (state == null || !state.visible || welcomeShowing(state)) {
       if (force || lastDrawnKey != "hidden") {
         filter.alpha = 0f
         lastDrawnKey = "hidden"
@@ -820,7 +823,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     val filter = viewersFilter ?: return
     val state = matchState
     val count = viewerCount
-    val show = state != null && state.viewers && state.visible && count != null
+    val show = state != null && state.viewers && state.visible && !welcomeShowing(state) && count != null
     val key = if (show) "v$count" else "off"
     if (!force && key == lastViewersKey) return
     lastViewersKey = key
