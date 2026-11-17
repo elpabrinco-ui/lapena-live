@@ -143,6 +143,10 @@ class ControlActivity : AppCompatActivity() {
       startActivity(Intent(this, LineupActivity::class.java))
     }
 
+    findViewById<Button>(R.id.btnVote).setOnClickListener {
+      startActivity(Intent(this, VoteActivity::class.java))
+    }
+
     findViewById<Button>(R.id.btnNewMatch).setOnClickListener {
       confirm("¿Empezar un partido nuevo? Goles y reloj vuelven a cero.") {
         change { copy(homeGoals = 0, awayGoals = 0, period = 1, running = false, elapsedMs = 0) }

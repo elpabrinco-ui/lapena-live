@@ -202,14 +202,37 @@ object YouTubeApi {
    * YouTube exige mandar título y categoría al actualizar, así que se leen primero.
    * Cuesta 51 unidades de cupo (1 lectura + 1 actualización).
    */
-  fun setChapters(token: String, videoId: String, chapters: String) {
+  fun setChapters(token: String, videoId: String, chapters: String) = updateDescription(token, videoId) { oldDesc ->
+    // Si ya había capítulos de la app, se reemplazan
+    val base = oldDesc.substringBefore(CHAPTERS_HEADER).trimEnd()
+    (if (base.isEmpty()) "" else base + "\n\n") + CHAPTERS_HEADER + "\n" + chapters
+  }
+
+  private const val FIGURE_PREFIX = "⭐ Figura del partido:"
+
+  /** Agrega (o reemplaza) la línea de la figura, antes de los capítulos. */
+  fun setFigure(token: String, videoId: String, figure: String) = updateDescription(token, videoId) { oldDesc ->
+    val clean = oldDesc.lines().filterNot { it.startsWith(FIGURE_PREFIX) }.joinToString("\n")
+    val line = "$FIGURE_PREFIX $figure"
+    if (clean.contains(CHAPTERS_HEADER)) {
+      val before = clean.substringBefore(CHAPTERS_HEADER).trimEnd()
+      (if (before.isEmpty()) "" else before + "\n\n") + line + "\n\n" + CHAPTERS_HEADER + clean.substringAfter(CHAPTERS_HEADER)
+    } else {
+      (if (clean.isBlank()) "" else clean.trimEnd() + "\n\n") + line
+    }
+  }
+
+  /** Últimos vivos terminados (el más reciente primero). */
+  fun listCompleted(token: String): List<Broadcast> =
+    items(call(token, "GET", "liveBroadcasts?part=id,snippet,status,contentDetails&broadcastStatus=completed&maxResults=5"))
+      .map(::parseBroadcast)
+
+  /** Lee el snippet del video, cambia la descripción y lo guarda (YouTube exige título y categoría). */
+  private fun updateDescription(token: String, videoId: String, change: (String) -> String) {
     val item = items(call(token, "GET", "videos?part=snippet&id=${enc(videoId)}")).firstOrNull()
       ?: throw YouTubeException("No se encontró el video")
     val snippet = item.getJSONObject("snippet")
-    val oldDesc = snippet.optString("description")
-    // Si ya había capítulos de la app, se reemplazan
-    val base = oldDesc.substringBefore(CHAPTERS_HEADER).trimEnd()
-    val newDesc = (if (base.isEmpty()) "" else base + "\n\n") + CHAPTERS_HEADER + "\n" + chapters
+    val newDesc = change(snippet.optString("description"))
     val newSnippet = JSONObject()
       .put("title", snippet.optString("title"))
       .put("categoryId", snippet.optString("categoryId", "17"))

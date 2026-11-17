@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#7A1F2B">
+<title>La Peña FC · Figura del partido</title>
+<link rel="icon" href="crest.png">
+<style>
+  :root { --maroon:#7A1F2B; --maroon2:#5c1620; --dark:#141414; --card:#1f1d20; --muted:#b9a9ab; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--dark); color:#fff; }
+  header { background:var(--maroon); padding:20px 16px 18px; text-align:center; }
+  header img { width:84px; height:84px; }
+  header h1 { margin:8px 0 2px; font-size:22px; letter-spacing:.5px; }
+  header p { margin:0; color:#ffd6d6; font-size:15px; }
+  main { max-width:520px; margin:0 auto; padding:16px; }
+  .step { color:var(--muted); font-size:13px; text-transform:uppercase; letter-spacing:1px; margin:18px 0 8px; }
+  select, button { font:inherit; }
+  select { width:100%; padding:14px; border-radius:12px; border:1px solid #444; background:var(--card); color:#fff; font-size:17px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .cand { padding:16px 10px; border-radius:12px; border:2px solid #3a3538; background:var(--card); color:#fff; font-size:17px; font-weight:700; text-align:center; cursor:pointer; }
+  .cand small { display:block; color:var(--muted); font-weight:400; font-size:13px; }
+  .cand.sel { border-color:#fff; background:var(--maroon); }
+  .cand:disabled { opacity:.3; cursor:not-allowed; }
+  .primary { width:100%; margin-top:18px; padding:16px; border:0; border-radius:12px; background:#2E7D32; color:#fff; font-size:18px; font-weight:800; letter-spacing:.5px; cursor:pointer; }
+  .primary:disabled { background:#3a3a3a; color:#888; }
+  .box { background:var(--card); border-radius:14px; padding:18px; text-align:center; margin-top:16px; }
+  .big { font-size:30px; font-weight:800; margin:6px 0; }
+  .muted { color:var(--muted); font-size:14px; }
+  .bar { display:flex; justify-content:space-between; color:var(--muted); font-size:14px; margin-top:6px; }
+  .row { display:flex; justify-content:space-between; padding:8px 4px; border-bottom:1px solid #2c2a2d; }
+  .lock { font-size:13px; color:var(--muted); margin-top:14px; text-align:center; }
+  .err { color:#ffb4b4; }
+</style>
+</head>
+<body>
+<header>
+  <img src="crest.png" alt="La Peña FC">
+  <h1>FIGURA DEL PARTIDO</h1>
+  <p id="match">Cargando…</p>
+</header>
+<main id="app"><div class="box muted">Cargando la votación…</div></main>
+
+<script>
+/*
+ * Votación de la figura de La Peña FC.
+ * - Los mensajes van por ntfy.sh (tópico "lapenavoto-<ID>").
+ * - El voto se cifra con la llave pública del celular del marcador (RSA-OAEP SHA-256):
+ *   solo ese celular puede saber a quién votó cada uno. Acá solo se ve QUIÉN votó.
+ */
+const ID = (location.hash.slice(1) || new URLSearchParams(location.search).get('v') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const TOPIC = 'lapenavoto-' + ID;
+const NTFY = 'https://ntfy.sh/';
+const app = document.getElementById('app');
+let poll = null, vote = null, myName = localStorage.getItem('voter-' + ID) || '', myChoice = '', sending = false;
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function split(label) { const m = String(label).match(/^(\d+)\s+(.*)$/); return m ? { num: m[1], name: m[2] } : { num: '', name: label }; }
+
+async function load() {
+  const res = await fetch(`${NTFY}${TOPIC}/json?poll=1&since=all`, { cache: 'no-store' });
+  const text = await res.text();
+  let open = null, closed = null; const voters = new Set();
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    let ev, msg; try { ev = JSON.parse(line); msg = JSON.parse(ev.message); } catch (e) { continue; }
+    if (ev.event !== 'message' || !msg || !msg.t) continue;
+    if (msg.t === 'open') { open = msg; open.at = ev.time; closed = null; voters.clear(); }
+    else if (msg.t === 'vote' && open && ev.time >= open.at) voters.add(msg.voter);
+    else if (msg.t === 'closed' && open) closed = msg;
+  }
+  return { open, closed, voters };
+}
+
+function remaining(closes) {
+  const s = Math.max(0, Math.round((closes - Date.now()) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function render() {
+  const v = vote;
+  if (!ID) { app.innerHTML = '<div class="box err">Falta el código de la votación en el link.</div>'; return; }
+  if (!v || !v.open) { document.getElementById('match').textContent = 'La Peña FC';
+    app.innerHTML = '<div class="box">No encontramos esta votación.<p class="muted">Puede que todavía no se haya abierto o que el link esté incompleto.</p></div>'; return; }
+  document.getElementById('match').textContent = v.open.title || 'La Peña FC';
+  const n = v.voters.size;
+
+  // Votación cerrada: resultado
+  if (v.closed || Date.now() > v.open.closes) {
+    if (!v.closed) { app.innerHTML = `<div class="box"><div class="muted">Tiempo terminado</div><div class="big">⏳</div><p class="muted">Esperando el resultado del celular del marcador…</p><p class="muted">Votaron ${n}</p></div>`; return; }
+    const w = (v.closed.winner || []);
+    const rows = Object.entries(v.closed.counts || {}).sort((a, b) => b[1] - a[1])
+      .map(([c, k]) => `<div class="row"><span>${esc(c)}</span><b>${k}</b></div>`).join('');
+    app.innerHTML = `<div class="box"><div class="muted">${w.length > 1 ? 'EMPATE · FIGURAS DEL PARTIDO' : 'FIGURA DEL PARTIDO'}</div>
+      <div class="big">⭐ ${w.map(esc).join(' y ') || '—'}</div><p class="muted">Votaron ${v.closed.voters ?? n}</p></div>
+      <div class="box" style="text-align:left">${rows || '<span class="muted">Sin votos</span>'}</div>`;
+    return;
+  }
+
+  // Votación abierta
+  const voterOpts = v.open.voters.map(x => `<option value="${esc(x)}" ${x === myName ? 'selected' : ''}>${esc(x)}${v.voters.has(x) ? ' ✓' : ''}</option>`).join('');
+  const cands = v.open.cands.map(c => { const p = split(c); const self = c === myName;
+    return `<button class="cand ${c === myChoice ? 'sel' : ''}" data-c="${esc(c)}" ${self || !myName ? 'disabled' : ''}>${esc(p.name)}<small>${p.num ? '#' + esc(p.num) : ''}${self ? ' · sos vos' : ''}</small></button>`; }).join('');
+  const already = myName && v.voters.has(myName);
+  app.innerHTML = `
+    <div class="bar"><span>⏱ Cierra en <b id="left">${remaining(v.open.closes)}</b></span><span>Votaron <b>${n}</b></span></div>
+    <div class="step">1 · ¿Quién sos?</div>
+    <select id="who"><option value="">Elegí tu nombre…</option>${voterOpts}</select>
+    <div class="step">2 · Tu figura del partido</div>
+    <div class="grid">${cands}</div>
+    <button class="primary" id="send" ${!myName || !myChoice || sending ? 'disabled' : ''}>${sending ? 'ENVIANDO…' : already ? 'CAMBIAR MI VOTO' : 'VOTAR'}</button>
+    ${already ? '<div class="box">✅ Ya votaste. Si querés, podés cambiar tu voto: cuenta el último.</div>' : ''}
+    <div class="lock">🔒 El voto es secreto: solo se ve quién votó, no a quién.</div>`;
+  document.getElementById('who').onchange = e => { myName = e.target.value; localStorage.setItem('voter-' + ID, myName); if (myChoice === myName) myChoice = ''; render(); };
+  app.querySelectorAll('.cand').forEach(b => b.onclick = () => { myChoice = b.dataset.c; render(); });
+  document.getElementById('send').onclick = send;
+}
+
+function b64ToBuf(b64) { const s = atob(b64); const a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a.buffer; }
+function bufToB64(buf) { let s = ''; new Uint8Array(buf).forEach(b => s += String.fromCharCode(b)); return btoa(s); }
+
+async function send() {
+  if (!myName || !myChoice || myChoice === myName) return;
+  sending = true; render();
+  try {
+    const key = await crypto.subtle.importKey('spki', b64ToBuf(vote.open.pub), { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']);
+    const enc = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, key, new TextEncoder().encode(myChoice));
+    const body = JSON.stringify({ t: 'vote', voter: myName, enc: bufToB64(enc) });
+    const r = await fetch(NTFY + TOPIC, { method: 'POST', body });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    vote.voters.add(myName);
+  } catch (e) {
+    alert('No se pudo enviar el voto. Revisá la conexión y probá de nuevo.');
+  }
+  sending = false; render();
+}
+
+async function refresh() {
+  try { const fresh = await load(); vote = fresh; } catch (e) { if (!vote) app.innerHTML = '<div class="box err">Sin conexión. Reintentando…</div>'; return; }
+  render();
+}
+refresh();
+setInterval(refresh, 10000);
+setInterval(() => { const el = document.getElementById('left'); if (el && vote && vote.open) el.textContent = remaining(vote.open.closes); }, 1000);
+</script>
+</body>
+</html>

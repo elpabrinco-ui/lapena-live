@@ -58,6 +58,42 @@ object ScoreSync {
     }
   }
 
+  /** Manda un texto cualquiera a un tópico de ntfy (bloqueante: llamar en un hilo). */
+  fun publishRaw(topic: String, text: String): Boolean = try {
+    val conn = URL(SERVER + topic).openConnection() as HttpURLConnection
+    conn.requestMethod = "POST"
+    conn.connectTimeout = 8000
+    conn.readTimeout = 8000
+    conn.doOutput = true
+    conn.setRequestProperty("Content-Type", "text/plain; charset=utf-8")
+    conn.outputStream.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+    val ok = conn.responseCode in 200..299
+    conn.disconnect()
+    ok
+  } catch (e: Exception) {
+    false
+  }
+
+  /**
+   * Lee todos los mensajes guardados de un tópico (las últimas horas) de una vez.
+   * Devuelve pares (hora en segundos, texto). Bloqueante.
+   */
+  fun pollAll(topic: String): List<Pair<Long, String>> {
+    val conn = URL("$SERVER$topic/json?poll=1&since=all").openConnection() as HttpURLConnection
+    conn.connectTimeout = 10000
+    conn.readTimeout = 20000
+    val out = ArrayList<Pair<Long, String>>()
+    BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8)).use { r ->
+      while (true) {
+        val line = r.readLine() ?: break
+        val ev = try { JSONObject(line) } catch (e: Exception) { continue }
+        if (ev.optString("event") == "message") out.add(ev.optLong("time") to ev.optString("message"))
+      }
+    }
+    conn.disconnect()
+    return out
+  }
+
   /**
    * Escucha el canal sin parar (se reconecta solo). Al conectarse recibe el último
    * estado de las últimas horas, así el marcador aparece aunque el control haya

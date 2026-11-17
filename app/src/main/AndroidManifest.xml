@@ -40,6 +40,12 @@
       android:windowSoftInputMode="adjustResize" />
 
     <activity
+      android:name=".VoteActivity"
+      android:exported="false"
+      android:screenOrientation="portrait"
+      android:theme="@style/Theme.LaPenaControl" />
+
+    <activity
       android:name=".LineupActivity"
       android:exported="false"
       android:screenOrientation="portrait"

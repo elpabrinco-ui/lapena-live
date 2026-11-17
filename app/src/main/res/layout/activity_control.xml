@@ -227,6 +227,16 @@
       android:textColor="#FFFFFF" />
 
     <Button
+      android:id="@+id/btnVote"
+      android:layout_width="match_parent"
+      android:layout_height="56dp"
+      android:layout_marginTop="16dp"
+      android:backgroundTint="#B8860B"
+      android:textColor="#FFFFFF"
+      android:textStyle="bold"
+      android:text="⭐ VOTAR FIGURA DEL PARTIDO" />
+
+    <Button
       android:id="@+id/btnNewMatch"
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
