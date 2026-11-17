@@ -112,6 +112,7 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
   private var lastGoalSeq = -1
   private var goalBannerUntil = 0L
   private var lastGoalKey = ""
+  private var lastGoalAt = 0L
 
   // Momentos para los capítulos de YouTube
   private data class Moment(var atMs: Long, val kind: String, val text: String,
@@ -851,13 +852,18 @@ class MainActivity : AppCompatActivity(), ConnectChecker {
     // Gol nuevo
     if (new.goalSeq > lastGoalSeq && new.goalTeam in 1..2) {
       lastGoalSeq = new.goalSeq
+      lastGoalAt = now
       goalBannerUntil = now + GOAL_BANNER_MS
       if (live) moments.add(Moment(at, "goal", "", new.goalSeq, new.goalScorer, new.goalTeam).also {
         it.atMs = (at - GOAL_REWIND_MS).coerceAtLeast(0)
       })
       redrawGoal(force = true)
     } else if (new.goalSeq == lastGoalSeq) {
-      // Llegó el nombre del goleador del último gol
+      // Llegó el nombre del goleador del último gol: se muestra (de nuevo) 6 s con el nombre
+      if (new.goalScorer.isNotBlank() && new.goalScorer != (old?.goalScorer ?: "") &&
+        now - lastGoalAt < 60_000) {
+        goalBannerUntil = now + GOAL_BANNER_MS
+      }
       moments.lastOrNull { it.goalSeq == new.goalSeq }?.scorer = new.goalScorer
       redrawGoal(force = true)
     }
